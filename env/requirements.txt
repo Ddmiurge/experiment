@@ -1,0 +1,15 @@
+# 占位 —— 版本待 T0.1 在服务器上用 pip freeze 锁定后覆盖本文件。
+#
+# 锁版本是这个项目的硬要求：验收标准是 ±2pp 对齐原文读数，
+# 依赖版本漂移产生的差异与要测的效应同量级。
+#
+# T0.1 完成后执行：
+#     pip freeze > env/requirements.lock.txt
+# 并把下面这些包的版本从 lock 里抄回来。
+
+torch
+transformers
+accelerate
+pillow
+numpy
+pyyaml

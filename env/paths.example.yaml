@@ -1,0 +1,28 @@
+# 路径模板 —— 复制成 env/paths.yaml 后按机器修改。
+# paths.yaml 不进 git（每台机器不同）。
+#
+# Mac 上只有 results/ 和 third_party/ 有意义；
+# 模型、数据、runtime 三项只有服务器需要填。
+
+models:
+  llava_1_5_7b:     /root/models/llava-v1.5-7b
+  llama_guard_3_8b: /root/models/Llama-Guard-3-8B
+
+data:
+  mm_safetybench:   /root/data/MM-SafetyBench
+  figstep:          /root/data/FigStep
+  jailbreakv_28k:   /root/data/JailBreakV-28K
+  mmbench:          /root/data/MMBench
+  mm_vet:           /root/data/MM-Vet
+
+# 由 env/fetch_third_party.sh 拉取，相对仓库根
+third_party: ./third_party
+
+# 结果落盘，相对仓库根
+results: ./results
+
+runtime:
+  # 必须 eager。FlashAttention-2 不返回注意力权重，且不报错，只给 None。
+  attn_implementation: eager
+  device: cuda:0
+  dtype: float16

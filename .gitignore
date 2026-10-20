@@ -1,0 +1,29 @@
+# ── 每台机器不同，不进 git ──────────────────────────────────
+env/paths.yaml
+env/paths.local.yaml
+
+# ── 数据与权重：只在服务器上存在，路径见 env/paths.yaml ──────
+#    开头的 / 是必需的：否则会误伤 src/data/ 和 src/models/
+/data/
+/weights/
+*.safetensors
+*.bin
+*.gguf
+
+# ── 第三方仓库：由 env/fetch_third_party.sh 按 lock 检出 ──────
+#    仓库内容不进 git；third_party.lock 必须进（它才是复现依据）
+third_party/*
+!third_party/.gitkeep
+
+# ── 实验结果 ────────────────────────────────────────────────
+#    json 是产物，留在服务器上；inbox 里的结果块要进 git
+results/*
+!results/.gitkeep
+!results/inbox
+
+# ── 杂项 ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+*.log
+.DS_Store
