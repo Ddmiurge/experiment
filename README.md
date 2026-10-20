@@ -59,7 +59,8 @@ bash env/fetch_third_party.sh
 
 ```
 code/
-├── Agent.md              ← 服务器侧 Agent 的操作手册
+├── Agent.md              ← 服务器侧 Agent 的常驻操作手册
+├── TASKS.md              ← 服务器侧 Agent 的本轮任务（每轮更新）
 ├── env/
 │   ├── paths.example.yaml    路径模板（复制成 paths.yaml，不进 git）
 │   ├── requirements.txt      占位，T0.1 后锁定
@@ -131,8 +132,14 @@ python scripts/result_block.py parse results/inbox/
 行和偏离 3.35e-04，峰值/均匀最高 32.73。**命题的生死线过了。**
 后续统一用路径 B（forward hook）。
 
-**下一步的两个卡点**：① MM-SafetyBench 等数据集一个都没下；
-② TRIM 仓库 URL 未确认。这两件事不解决，T1 开不了工。
+**下一步的两个卡点**：① MM-SafetyBench 未下载——已定位到镜像
+`PKU-Alignment/MM-SafetyBench`；② TRIM 仓库 URL 未确认。
+
+**本轮指令见 `TASKS.md`**（拉数据 + 查 TRIM + 收尾）。
+
+**Mac 侧同时进行**：回 Token-Pruning §4 钉死 SAP 的三处歧义
+（P token 集 / 哪层隐藏状态 / v_safe 取哪个位置）。这三个错了 SAP 复现不出来，
+而且不需要 GPU——数据下载时正好做。
 
 服务器报告原文：`results/REPORT_T0_2026-10-20.md`。
 
