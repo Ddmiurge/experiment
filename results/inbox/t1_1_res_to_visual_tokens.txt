@@ -1,0 +1,20 @@
+# 来源：服务器报告 REPORT_T1.1_2026-10-20.md §五
+# 分辨率 → 视觉 token 数实测。kind=utility，无 ASR。
+
+=== RESULT BLOCK v1 ===
+exp:    t1_1_res_to_visual_tokens
+time:   2026-10-20T17:38:47+08:00
+env:    torch=2.14.1+cu130 cuda=13.0 transformers=5.20.2 py=3.10 host=gpu84 model=/home/huangqixu01/models/llava-1.5-7b-hf git=bc3364bbe4f7
+cfg:    model=llava-1.5-7b-hf processor=shortest_edge=336,crop=336
+kind:   utility
+n:      4
+asr:    n/a
+dist:   0=0.0000 1=0.0000 2=0.0000 3=1.0000
+n_vis_224: 576
+n_vis_336: 576
+n_vis_448: 576
+n_vis_512: 576
+note:    processor 固定缩放到 336x336，视觉 token 恒为 576=24x24
+data:
+  3333
+=== END ===

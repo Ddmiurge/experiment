@@ -1,0 +1,30 @@
+# 来源：服务器报告 REPORT_T1.1_2026-10-20.md §五
+# 数据集盘点，非攻击判定 —— kind=utility，无 ASR。
+
+=== RESULT BLOCK v1 ===
+exp:    t1_1_mm_safetybench_inventory
+time:   2026-10-20T17:38:47+08:00
+env:    torch=2.14.1+cu130 cuda=13.0 transformers=5.20.2 py=3.10 host=gpu84 git=bc3364bbe4f7 source=hf-mirror
+cfg:    dataset=MM-SafetyBench source=hf-mirror_PKU-Alignment split=all4 categories=13
+kind:   utility
+n:      4
+asr:    n/a
+dist:   0=0.0000 1=0.0000 2=0.0000 3=1.0000
+n_economicharm: 122
+n_financial_advice: 167
+n_fraud: 154
+n_gov_decision: 149
+n_hatespeech: 163
+n_health_consultation: 109
+n_illegal_activitiy: 97
+n_legal_opinion: 130
+n_malware_generation: 44
+n_physical_harm: 144
+n_political_lobbying: 153
+n_privacy_violence: 139
+n_sex:   109
+total_per_split: 1680
+total_all_splits: 6720
+data:
+  3333
+=== END ===
