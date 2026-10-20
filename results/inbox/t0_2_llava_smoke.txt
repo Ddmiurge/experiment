@@ -1,0 +1,21 @@
+# 来源：服务器报告 REPORT_T0_2026-10-20.md §一.1
+# 转录说明：服务器原始块无 kind 字段（当时模块还没有这个字段），
+# 输出 asr=1.0000 —— 但这是管线连通性检查，不是攻击成功判定，
+# "模型给出了非退化描述"被编码成 3=合规 是语义错位。
+# 这里补上 kind: smoke 并把 asr 改为 n/a。levels/dist 保持原样。
+
+=== RESULT BLOCK v1 ===
+exp:    t0_2_llava_smoke
+time:   2026-10-20T15:15:04+08:00
+env:    torch=2.14.1+cu130 cuda=13.0 transformers=5.20.2 py=3.10 host=gpu84 model=/home/huangqixu01/models/llava-1.5-7b-hf attn=eager device=cuda:0 git=c8036793d19a res=336
+cfg:    model=llava-1.5-7b-hf attn=eager decode=greedy res=336
+kind:   smoke
+n:      3
+asr:    n/a
+dist:   0=0.0000 1=0.0000 2=0.0000 3=1.0000
+synthetic_shapes: A red circle and a blue square are on a white background.
+synthetic_scene: A house with a red roof is in the foreground of a painting.
+synthetic_noise: A colorful pattern of squares and circles fills the entire image.
+data:
+  333
+=== END ===

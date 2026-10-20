@@ -1,0 +1,9 @@
+# 第三方仓库锁定 —— 复现依据。仓库内容不进 git，这个文件进。
+# 由 env/fetch_third_party.sh 首次解析时写入；之后所有机器按此 SHA 检出。
+#
+# 来源：服务器 2026-10-20 T0 阶段检出（见 results/REPORT_T0_2026-10-20.md §五）
+# 注意：trim 尚未确认仓库 URL，T1.2 之前必须补上。
+# name	url	sha	fetched_at
+llava	https://github.com/haotian-liu/LLaVA	c121f0432da27facab705978f83c4ada465e46fd	2026-10-20T15:10:00+08:00
+sparsevlm	https://github.com/Gumpest/SparseVLMs	a9e71427220c4cacb6afb5a96d23cfb43142e0c3	2026-10-20T15:10:00+08:00
+mm-safetybench	https://github.com/isXinLiu/MM-SafetyBench	b80eedea3db312c09ded2082813390f68e750ef3	2026-10-20T15:10:00+08:00

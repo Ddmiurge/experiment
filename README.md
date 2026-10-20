@@ -37,10 +37,8 @@ Mac（唯一写者）                         服务器（只读消费者）
 ```bash
 cd code
 
-# 1. 建仓库（三选一，还没做）
-git init && git add -A && git commit -m "骨架"
-git remote add origin <你的仓库URL>      # GitHub private 或 Gitee
-git push -u origin main
+# 1. 仓库已建好，remote 已指向 Ddmiurge/experiment
+git pull
 
 # 2. 路径配置（服务器上做）
 cp env/paths.example.yaml env/paths.yaml
@@ -49,7 +47,7 @@ cp env/paths.example.yaml env/paths.yaml
 python scripts/result_block.py selftest
 
 # 4. 出网边界（服务器上做，最先跑）
-bash scripts/check_egress.sh <仓库URL>
+bash scripts/check_egress.sh
 
 # 5. 第三方仓库（服务器上做）
 bash env/fetch_third_party.sh
@@ -114,15 +112,38 @@ python scripts/result_block.py parse results/inbox/
 
 ## 当前状态（2026-10-20）
 
+仓库：`git@github.com:Ddmiurge/experiment.git`
+
 | 项 | 状态 |
 |---|---|
 | 目录骨架 | ✅ |
-| 结果块模块 | ✅ 往返自检通过 |
-| 出网探测脚本 | ✅ 待服务器上实跑 |
-| T0.4 验证脚本 | ✅ 待服务器上实跑（**一票否决项**） |
-| `third_party` URL | ⚠️ 未逐个核验，`TRIM` 仍是 TODO |
-| git 仓库 | ⚠️ 尚未 `git init` |
-| `src/` 实际代码 | ⬜ T0.2 之后开始 |
+| 结果块模块 | ✅ 往返自检通过；含截断检测 + kind 语义 |
+| git 仓库 | ✅ 已推送 |
+| 出网边界 | ✅ 实测通过——GitHub pull 可用，主方案成立 |
+| `third_party` | ✅ 已锁 SHA（`third_party.lock`）；⚠️ `TRIM` 仍是 TODO |
+| 环境版本 | ✅ 已锁（`env/requirements.txt`，服务器实测值） |
+| **T0.1–T0.4** | ✅ **4/4 通过**，含一票否决项 T0.4 |
+| T1.1 数据集 | ❌ **未下载**——当前卡点 |
+| T1.2 剪枝器 | ❌ 等 TRIM URL 确认 |
+| `src/` 实际代码 | ⬜ 待 T1 开始 |
 
-**下一步**：在服务器上跑 `check_egress.sh` 和 `t0_4_attention_hook.py`。
-后者不过，整个计划停摆。
+**T0.4 结果**：32 层 `[1, 32, 596, 596]`，视觉 span `[5, 581)` 共 576 个 token，
+行和偏离 3.35e-04，峰值/均匀最高 32.73。**命题的生死线过了。**
+后续统一用路径 B（forward hook）。
+
+**下一步的两个卡点**：① MM-SafetyBench 等数据集一个都没下；
+② TRIM 仓库 URL 未确认。这两件事不解决，T1 开不了工。
+
+服务器报告原文：`results/REPORT_T0_2026-10-20.md`。
+
+---
+
+## 服务器侧命令
+
+```bash
+git clone https://github.com/Ddmiurge/experiment.git
+cd experiment
+cp env/paths.example.yaml env/paths.yaml   # 按实际路径改
+bash env/fetch_third_party.sh              # 按 third_party.lock 检出
+python scripts/result_block.py selftest
+```

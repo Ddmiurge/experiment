@@ -37,7 +37,7 @@ REPOS=(
   "llava|https://github.com/haotian-liu/LLaVA|main"
   "trim|TODO|TODO"
   "sparsevlm|https://github.com/Gumpest/SparseVLMs|main"
-  "mm-safetybench|https://github.com/ThuCCSLab/MM-SafetyBench|main"
+  "mm-safetybench|https://github.com/isXinLiu/MM-SafetyBench|main"
 )
 
 locked_sha() {  # $1=name

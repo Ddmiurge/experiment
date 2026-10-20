@@ -1,15 +1,25 @@
-# 占位 —— 版本待 T0.1 在服务器上用 pip freeze 锁定后覆盖本文件。
+# 服务器环境锁定 —— gpu84，2026-10-20 实测（T0.1）
+# 来源：results/REPORT_T0_2026-10-20.md §三
 #
 # 锁版本是这个项目的硬要求：验收标准是 ±2pp 对齐原文读数，
 # 依赖版本漂移产生的差异与要测的效应同量级。
 #
-# T0.1 完成后执行：
-#     pip freeze > env/requirements.lock.txt
-# 并把下面这些包的版本从 lock 里抄回来。
+# 服务器上另有完整的 env/requirements.lock.txt（pip freeze 全量），
+# 但服务器不能 push，所以这里只锁直接相关的包。
 
-torch
-transformers
-accelerate
-pillow
-numpy
-pyyaml
+# 运行时
+torch==2.14.1+cu130
+transformers==5.20.2
+accelerate==1.15.0
+
+# 数据与工具
+numpy==2.2.6
+pillow==12.3.0
+pyyaml==6.0.3
+
+# 环境：Ubuntu 22.04 LTS / Python 3.10.12 / CUDA 13.0
+
+# ⚠ 待观察：transformers 5.20.2 比 LLaVA-1.5 发布时间晚很多。
+#   T0.2 / T0.3 / T0.4 在该版本全部通过（注意力走 forward hook，不受版本影响），
+#   但 T1.4 要对齐原文的 54.01 / 62.33 —— 若偏离超 ±2pp，
+#   版本差异是候选原因之一，届时考虑降到原文年代的 transformers 4.x 重跑。
