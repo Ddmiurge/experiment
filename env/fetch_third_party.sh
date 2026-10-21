@@ -31,11 +31,13 @@ warn() { printf '  \033[33m!\033[0m %s\n' "$1"; }
 # ⚠ 下面的 URL 我没有逐个核验过。clone 失败会立刻报错并继续下一个，
 #   第一次跑请盯输出，把失败的 URL 改对再跑一遍。
 #
-# ⚠ TRIM 那一行是 TODO：Token-Pruning 用的 TRIM 是哪个仓库需要先确认
-#   （见 代码任务清单 避坑清单）。T1.2 之前必须填上。
+# ⚠ TRIM 已定案（2026-10-20）：Token-Pruning 原文参考文献里写作
+#   Song, D., et al. "Less is more: A simple yet effective token reduction
+#   method for efficient multi-modal LLMs." arXiv:2409.10994, 2024.
+#   本地有 P1_TRIM_2409.10994.pdf 可对照。
 REPOS=(
   "llava|https://github.com/haotian-liu/LLaVA|main"
-  "trim|TODO|TODO"
+  "trim|https://github.com/FreedomIntelligence/TRIM|main"
   "sparsevlm|https://github.com/Gumpest/SparseVLMs|main"
   "mm-safetybench|https://github.com/isXinLiu/MM-SafetyBench|main"
 )

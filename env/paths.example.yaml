@@ -6,7 +6,21 @@
 
 models:
   llava_1_5_7b:     /root/models/llava-v1.5-7b
-  llama_guard_3_8b: /root/models/Llama-Guard-3-8B
+  judge_qwen3_8b:   /root/models/Qwen3-8B
+  # 以下两个已弃用，保留仅为对照：
+  #   llama_guard_3_8b —— T0.3 验过，但原文没用它（原文 MM-SafetyBench 用 GPT-4o-mini）
+  #   gpt4o_mini       —— 原文判官，需要 OpenAI API，服务器境内直连不通
+
+# ASR 判官（T1.3）
+judge:
+  model: judge_qwen3_8b
+  # 若服务器上的 vLLM 服务可直接用，填它的 OpenAI 兼容端点；否则留空走本地权重
+  endpoint: ""
+  decode: greedy        # temperature=0
+  seed: 42              # 与原文一致
+  protocol: mm_safetybench_3class   # Safe / Unsafe / Refusal
+  # ⚠ 与原文的偏离：裁判换了（Qwen3-8B 替代 GPT-4o-mini），判的问题相同。
+  #   T1.3 须人工标 100 条做校准，偏差写进交付物 1。
 
 data:
   mm_safetybench:   /root/data/MM-SafetyBench

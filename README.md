@@ -111,37 +111,38 @@ python scripts/result_block.py parse results/inbox/
 
 ---
 
-## 当前状态（2026-10-20）
+## 当前状态（2026-10-21）
 
 仓库：`git@github.com:Ddmiurge/experiment.git`
 
 | 项 | 状态 |
 |---|---|
-| 目录骨架 | ✅ |
-| 结果块模块 | ✅ 往返自检通过；含截断检测 + kind 语义 |
-| git 仓库 | ✅ 已推送 |
-| 出网边界 | ✅ 实测通过——GitHub pull 可用，主方案成立 |
-| `third_party` | ✅ 已锁 SHA（`third_party.lock`）；⚠️ `TRIM` 仍是 TODO |
+| 目录骨架 / 结果块模块 / git | ✅ |
+| 出网边界 | ✅ GitHub pull 可用，主方案成立 |
 | 环境版本 | ✅ 已锁（`env/requirements.txt`，服务器实测值） |
 | **T0.1–T0.4** | ✅ **4/4 通过**，含一票否决项 T0.4 |
-| T1.1 数据集 | ❌ **未下载**——当前卡点 |
-| T1.2 剪枝器 | ❌ 等 TRIM URL 确认 |
-| `src/` 实际代码 | ⬜ 待 T1 开始 |
+| **T1.1 数据集** | ✅ 13 类目 × 4 split，单 split 1680，共 6720，482MB |
+| `third_party` | ✅ TRIM 已定案 `FreedomIntelligence/TRIM`（arXiv:2409.10994） |
+| **T1.2 TRIM 集成** | ⬜ **本轮** |
+| **T1.3 判官** | ⬜ **本轮** |
+| T1.4 | ⬜ 等 T1.2/T1.3 |
 
 **T0.4 结果**：32 层 `[1, 32, 596, 596]`，视觉 span `[5, 581)` 共 576 个 token，
 行和偏离 3.35e-04，峰值/均匀最高 32.73。**命题的生死线过了。**
 后续统一用路径 B（forward hook）。
 
-**下一步的两个卡点**：① MM-SafetyBench 未下载——已定位到镜像
-`PKU-Alignment/MM-SafetyBench`；② TRIM 仓库 URL 未确认。
+### ⚠ 读原文后的三处口径修正（2026-10-21）
 
-**本轮指令见 `TASKS.md`**（拉数据 + 查 TRIM + 收尾）。
+1. **判官换了**。原文 MM-SafetyBench 用 **GPT-4o-mini**，不是 LLaMA-Guard-3-8B
+   （16 页里没出现过）。境内连不上 OpenAI，**改用本地 Qwen3-8B**。判的问题与原文
+   相同（模型是否遵从有害指令），只是换了裁判 —— 可校准的偏离。
+2. **验收数字换了**。54.01 / 62.33 / 50.19 是**三基准均值**。只跑 MM-SafetyBench 时
+   对应 **59.37 / 65.87 / 52.78**。
+3. **超参已定**（原文 §6.1）：m=10，λ=0.6，剪枝率 75%，BTR 恢复 10%，seed=42，greedy。
 
-**Mac 侧同时进行**：回 Token-Pruning §4 钉死 SAP 的三处歧义
-（P token 集 / 哪层隐藏状态 / v_safe 取哪个位置）。这三个错了 SAP 复现不出来，
-而且不需要 GPU——数据下载时正好做。
+报告：`results/REPORT_T0_2026-10-20.md`、`results/REPORT_T1.1_2026-10-20.md`。
 
-服务器报告原文：`results/REPORT_T0_2026-10-20.md`。
+**本轮指令见 `TASKS.md`**（接 TRIM + 建判官 + 100 条校准集）。
 
 ---
 
