@@ -21,28 +21,56 @@ import sys
 from pathlib import Path
 
 ITEM_RE = re.compile(r"^## (\d{3}) · (.+?)\s*$", re.M)
-LABEL_RE = re.compile(r"^\*\*我的判定\*\*：\s*(__|[0-3])\s*$", re.M)
+LABEL_RE = re.compile(r"^\*\*我的判定\*\*：\s*(__|[0-3?])\s*$", re.M)
 
 LEVEL_NAMES = {0: "拒绝", 1: "误解", 2: "部分合规", 3: "合规"}
 
 
-def parse_blind(path: Path) -> tuple[dict[str, int], list[str]]:
-    """返回 (id → 标签, 未填的 id 列表)。"""
+def parse_blind(path: Path) -> tuple[dict[str, int], list[str], list[str]]:
+    """返回 (id → 标签, 未填的 id 列表, 标为 ? 的 id 列表)。
+
+    两种输入格式都认：
+      1. markdown 盲标文件（`## 001 · id` + `**我的判定**：X`）
+      2. 网页导出的文本（每行 `NNN<TAB>id<TAB>label`）
+    """
     text = path.read_text(encoding="utf-8")
+
+    # 格式 2：导出文本
+    if "\t" in text and ITEM_RE.search(text) is None:
+        filled: dict[str, int] = {}
+        blank: list[str] = []
+        unsure: list[str] = []
+        for line in text.splitlines():
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 3:
+                continue
+            _, item_id, lab = parts[0], parts[1], parts[2].strip()
+            if lab == "":
+                blank.append(item_id)
+            elif lab == "?":
+                unsure.append(item_id)
+            elif lab in "0123":
+                filled[item_id] = int(lab)
+            else:
+                raise ValueError(f"无法识别的标签 {lab!r}（id={item_id}）")
+        return filled, blank, unsure
+
+    # 格式 1：markdown
     items = ITEM_RE.findall(text)
     labels = LABEL_RE.findall(text)
     if len(items) != len(labels):
         raise ValueError(
             f"条目数 {len(items)} 与判定行数 {len(labels)} 不匹配 —— 文件被改坏了吗？"
         )
-    filled: dict[str, int] = {}
-    blank: list[str] = []
+    filled, blank, unsure = {}, [], []
     for (num, item_id), lab in zip(items, labels):
         if lab == "__":
             blank.append(item_id)
+        elif lab == "?":
+            unsure.append(item_id)
         else:
             filled[item_id] = int(lab)
-    return filled, blank
+    return filled, blank, unsure
 
 
 def load_compare(path: Path) -> dict[str, dict[str, str]]:
@@ -57,8 +85,8 @@ def main() -> int:
                     help="comparison_t1_3b_old_vs_new.tsv，用于算一致率")
     a = ap.parse_args()
 
-    filled, blank = parse_blind(a.blind)
-    print(f"已标 {len(filled)} 条，未标 {len(blank)} 条。")
+    filled, blank, unsure = parse_blind(a.blind)
+    print(f"已标 {len(filled)} 条，拿不准 {len(unsure)} 条，未标 {len(blank)} 条。")
     if not filled:
         print("一条都没标，先填了再跑。", file=sys.stderr)
         return 1
