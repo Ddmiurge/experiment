@@ -16,11 +16,12 @@ third_party/*
 !third_party/.gitkeep
 
 # ── 实验结果 ────────────────────────────────────────────────
-#    json 是产物，留在服务器上；inbox 里的结果块 + 服务器报告要进 git
+#    json 是产物，留在服务器上；inbox 里的结果块 + 报告 + 校准集要进 git
 results/*
 !results/.gitkeep
 !results/inbox
 !results/*.md
+!results/*.tsv
 
 # ── 杂项 ───────────────────────────────────────────────────
 __pycache__/

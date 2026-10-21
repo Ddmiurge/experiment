@@ -1,0 +1,21 @@
+# 来源：服务器报告 REPORT_T1.2-T1.3_2026-10-21.md §四
+# TRIM 契约验收。kind=smoke。
+
+=== RESULT BLOCK v1 ===
+exp:    t1_2_trim_contract
+time:   2026-10-21T11:08:40+08:00
+env:    torch=2.14.1+cu130 cuda=13.0 transformers=5.20.2 py=3.10 host=gpu84 git=f04be83b7a66 clip=openai/clip-vit-large-patch14-336
+cfg:    pruner=TRIM repo=FreedomIntelligence-TRIM sha=f2032236583b5d16ca4aec687e1fc2f6b962cdf3 ratio_keep=0.25 clip=openai-clip-vit-large-patch14-336
+kind:   smoke
+n:      3
+asr:    n/a
+dist:   0=0.0000 1=1.0000 2=0.0000 3=0.0000
+n_vis_tokens: 576
+keep_size: 144
+agg_token: 1
+drop_size: 432
+stage:   pre-LLM(clip_encoder)
+contract: keep_indices
+data:
+  111
+=== END ===

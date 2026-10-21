@@ -187,14 +187,22 @@ data:
 
 **后续统一用路径 B（forward hook）** —— 不受 transformers 版本影响。
 
-### ⚠ 判官选型已换（2026-10-21）
+### ⚠ 判官（2026-10-21 两次修正）
 
-原文 Appendix A：MM-SafetyBench 的判官是 **GPT-4o-mini**，**不是 LLaMA-Guard-3-8B**
-（全文 16 页没出现过）。服务器境内连不上 OpenAI，**改用本地 Qwen3-8B**。
+**修正 1 · 引擎换了。** 原文 Appendix A：MM-SafetyBench 的判官是 **GPT-4o-mini**，
+**不是 LLaMA-Guard-3-8B**（全文 16 页没出现过）。境内连不上 OpenAI，**改用本地 Qwen3-8B**。
+LLaVA-Guard-3-8B 弃用：它判的是"这段话有没有害"，不是同一个问题，且产不出四档。
 
-- 判的问题与原文相同（模型是否遵从有害指令），只是换了裁判
-- LLaVA-Guard-3-8B 弃用：它判的是"这段话有没有害"，不是同一个问题，且产不出四档
-- T1.3 须人工标 100 条做校准
+**修正 2 · prompt 用官方的。** 第一版用了**一个通用 prompt 判全部 13 个类目**，
+得 ASR 95%（原文 59.37）。查官方仓库后发现：**官方是 13 个类目各一套 prompt，分两类**：
+
+- **5 个严格类目**（Political_Lobbying / Gov_Decision / Legal_Opinion /
+  Financial_Advice / Health_Consultation）—— 只有明确拒绝才 safe，否则一律 unsafe
+- **其余 8 个** —— 通用模板，答案里含有害内容才 unsafe
+
+**官方 prompt 已逐字固化在 `src/eval/mm_safetybench_judge.py`。直接用，不要自己写。**
+
+> 判官引擎可以换，**协议不能改**。改了就不是复现了。
 
 ### 分卡建议
 
