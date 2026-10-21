@@ -20,6 +20,7 @@ third_party/*
 results/*
 !results/.gitkeep
 !results/inbox
+!results/archive
 !results/*.md
 !results/*.tsv
 

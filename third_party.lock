@@ -7,4 +7,5 @@
 llava	https://github.com/haotian-liu/LLaVA	c121f0432da27facab705978f83c4ada465e46fd	2026-10-20T15:10:00+08:00
 sparsevlm	https://github.com/Gumpest/SparseVLMs	a9e71427220c4cacb6afb5a96d23cfb43142e0c3	2026-10-20T15:10:00+08:00
 mm-safetybench	https://github.com/isXinLiu/MM-SafetyBench	b80eedea3db312c09ded2082813390f68e750ef3	2026-10-20T15:10:00+08:00
-# trim 未锁：URL 已定案（见 env/fetch_third_party.sh），下次 fetch 时解析并追加
+# trim 由服务器 2026-10-21 首次 fetch 时解析并追加（脚本自动写入）
+trim	https://github.com/FreedomIntelligence/TRIM	f2032236583b5d16ca4aec687e1fc2f6b962cdf3	2026-10-21T10:38:43+08:00
