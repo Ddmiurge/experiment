@@ -123,9 +123,10 @@ python scripts/result_block.py parse results/inbox/
 | **T0.1–T0.4** | ✅ **4/4 通过**，含一票否决项 T0.4 |
 | **T1.1 数据集** | ✅ 13 类目 × 4 split，单 split 1680，共 6720，482MB |
 | `third_party` | ✅ TRIM 已定案 `FreedomIntelligence/TRIM`（arXiv:2409.10994） |
-| **T1.2 TRIM 集成** | ⬜ **本轮** |
-| **T1.3 判官** | ⬜ **本轮** |
-| T1.4 | ⬜ 等 T1.2/T1.3 |
+| T1.2 TRIM 集成 | ✅ 契约验收通过（145 token 进 LLM） |
+| T1.3 判官 | ✅ 官方协议 + Qwen3-8B；100 条 ASR 58.00%（原文 59.37） |
+| **T1.4 复现 Table 1** | ❌ **方向不对**。SD split 上 TRIM−无剪枝 = −0.50pp（原文 +6.50pp）|
+| **T1.4b 换 TYPO split** | ⬜ **当前卡点**，见 TASKS.md |
 
 **T0.4 结果**：32 层 `[1, 32, 596, 596]`，视觉 span `[5, 581)` 共 576 个 token，
 行和偏离 3.35e-04，峰值/均匀最高 32.73。**命题的生死线过了。**
@@ -142,7 +143,12 @@ python scripts/result_block.py parse results/inbox/
 
 报告：`results/REPORT_T0_2026-10-20.md`、`results/REPORT_T1.1_2026-10-20.md`。
 
-**本轮指令见 `TASKS.md`**（T1.4：跑剪枝前后的 ASR）。
+**本轮指令见 `TASKS.md`**（T1.4b：换 TYPO split 重测）。
+
+> **T1.4 为什么没过**：MM-SafetyBench 官方评测是 3 种图文对（SD / SD_TYPO / TYPO，
+> 共 5040 对），我们只跑了第 1 种。SD 的图是主题配图，模型读不到任何文字，
+> 剪掉 75% 视觉 token 不影响抗不抗拒绝。TYPO 的图是白底黑字印刷体，有害短语
+> 清清楚楚——只有在这种图上剪枝才可能产生影响。
 
 ---
 
