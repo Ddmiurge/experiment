@@ -124,6 +124,19 @@ python -c "import torch,transformers;print(torch.__version__,transformers.__vers
 **超参（原文 §6.1，已定，不要再查）**：m=10，λ=0.6，剪枝率 75%，
 BTR 恢复保留集的 10%，seed=42，greedy 解码。
 
+> **剪枝率口径（2026-10-26 核实官方源码）**
+> TRIM 的参数 `k` 是**保留率**，不是剪枝率。
+> `third_party/trim/llava/model/multimodal_encoder/clip_encoder.py`：
+> L73 `k = float(token_reduce_func.replace('TRIM:',''))` →
+> L108 `num_tokens_to_keep = int(tokens_number * k)`。
+> 所以「剪枝 75%」= **`TRIM:0.25`** → 保留 144 / 576。
+>
+> **实际进 LLM 的是 145 个 token**（144 保留 + 1 个由 432 个被丢 token 求均值聚合，
+> L132/L135），实际削减 **74.8%**，不是 75.0%。报数字时写清楚。
+>
+> 别被 `TRIM:-1` 误导——那是出厂默认的 IQR 异常检测自动定保留率（L93–L101），
+> 不是原文口径。原文 Table 1 明写 TRIM 的 Pruning Rate = 75。
+
 **T0.4 不过 → 立刻停，报告，不要往下走。**
 **T1.4 偏离对照线 → 先查管线，不要往下走。**
 注意 T1.4 的对照线是 **MM-SafetyBench 单基准的 59.37 / 65.87**，
