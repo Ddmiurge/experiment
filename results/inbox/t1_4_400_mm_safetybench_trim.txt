@@ -1,7 +1,3 @@
-# 来源：服务器报告 archive/05_REPORT_T1.4_2026-10-22.md
-# TRIM 保留率 0.25（= 75% 剪枝）· MM-SafetyBench SD split · 399 条分层子集
-# ⚠ 与无剪枝差 -0.50pp，原文是 +6.50pp —— 方向不对，T1.4 未通过。
-
 === RESULT BLOCK v1 ===
 exp:    t1_4_400_mm_safetybench_trim
 time:   2026-10-22T11:48:54+08:00
