@@ -143,7 +143,7 @@ BTR 恢复保留集的 10%，seed=42，greedy 解码。
 > 而 TRIM 原文 §3.2 要「retain the tokens with **high** similarity scores」。
 > 我们的复刻逐行照抄（负号一起抄），所以**两个栈跑的都是反向着色剪枝**。
 > 这改变了 T1.4 全部读数的含义：**在符号修正格子跑完之前，不得下「效应不存在」的结论。**
-> 证据链与格子矩阵：`experiments/t1_5_2026-10-27/README_诊断_2026-10-27.md`。
+> 证据链与格子矩阵：`experiments/t1_5_2026-10-27/DIAGNOSIS_2026-10-27.md`。
 > 修正版走 `t1_5_orig_highsim.py` 的**进程内 monkeypatch**，
 > **仍然不许改 `third_party/` 磁盘文件**（规则 2 不变）。
 

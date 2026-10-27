@@ -153,7 +153,7 @@ F.softmax(similarities, dim=-1) → topk(largest=True)   # L90/L111 → 保留�
 2. 「只有 SD 基线对上 59.37」是**两个反向偏移抵消**的巧合：MM-SafetyBench 原文 SD=45.37 /
    Typo=71.52（`mean=58.45`），而我们判官在 SD 偏高 +13.1pp、Typo 只偏高 +4.4pp。
 
-完整证据链与判定树：`experiments/t1_5_2026-10-27/README_诊断_2026-10-27.md`。
+完整证据链与判定树：`experiments/t1_5_2026-10-27/DIAGNOSIS_2026-10-27.md`。
 
 **T0.4 结果**：32 层 `[1, 32, 596, 596]`，视觉 span `[5, 581)` 共 576 个 token，
 行和偏离 3.35e-04，峰值/均匀最高 32.73。**命题的生死线过了。**
