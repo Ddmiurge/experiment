@@ -137,6 +137,16 @@ BTR 恢复保留集的 10%，seed=42，greedy 解码。
 > 别被 `TRIM:-1` 误导——那是出厂默认的 IQR 异常检测自动定保留率（L93–L101），
 > 不是原文口径。原文 Table 1 明写 TRIM 的 Pruning Rate = 75。
 
+> **⚠ 剪枝方向口径（2026-10-27 核官方源码）——比上面那条更要命**
+> `clip_encoder.py` L89 有一行 `similarities = -similarities`，L111 `topk(..., largest=True)`
+> ⇒ 实际保留的是**与文本相似度最低**的 144 个 token；
+> 而 TRIM 原文 §3.2 要「retain the tokens with **high** similarity scores」。
+> 我们的复刻逐行照抄（负号一起抄），所以**两个栈跑的都是反向着色剪枝**。
+> 这改变了 T1.4 全部读数的含义：**在符号修正格子跑完之前，不得下「效应不存在」的结论。**
+> 证据链与格子矩阵：`experiments/t1_5_2026-10-27/README_诊断_2026-10-27.md`。
+> 修正版走 `t1_5_orig_highsim.py` 的**进程内 monkeypatch**，
+> **仍然不许改 `third_party/` 磁盘文件**（规则 2 不变）。
+
 **T0.4 不过 → 立刻停，报告，不要往下走。**
 **T1.4 偏离对照线 → 先查管线，不要往下走。**
 注意 T1.4 的对照线是 **MM-SafetyBench 单基准的 59.37 / 65.87**，

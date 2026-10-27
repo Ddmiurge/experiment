@@ -125,7 +125,35 @@ python scripts/result_block.py parse results/inbox/
 | `third_party` | ✅ TRIM 已定案 `FreedomIntelligence/TRIM`（arXiv:2409.10994） |
 | T1.2 TRIM 集成 | ✅ 契约验收通过（145 token 进 LLM） |
 | T1.3 判官 | ✅ 官方协议 + Qwen3-8B；100 条 ASR 58.00%（原文 59.37） |
-| **T1.4 系列（四轮）** | ❌ **均未复现方向**。目标 Table 2 MM-Safety 列 59.37→65.87；实测见下 |
+| **T1.4 系列（四轮）** | ❌ 均未复现方向（目标 Table 2 MM-Safety 列 59.37→65.87）。**10-27 更新：原因已定位，见下** |
+| **T1.5（当前轮）** | ⏳ 剪枝方向探针 + 符号修正四格。**指令见 `TASKS.md`** |
+
+### ⚠ 2026-10-27：「配置对了、效应不存在」这个结论被推翻
+
+核 TRIM 官方源码（锁定 SHA `f2032236`，与 `main` 零差异）发现：
+
+```python
+similarities = -similarities            # clip_encoder.py L89
+F.softmax(similarities, dim=-1) → topk(largest=True)   # L90/L111 → 保留相似度最低的 144 个
+```
+
+而 TRIM 原文 §3.2 要「**保留 high similarity** 的 token」。我们的复刻逐行照抄，
+所以两个栈都在跑**反向着色**剪枝——把与指令最相关、含 TYPO 图上关键词条带的 token 删掉。
+
+它一次解释了六组读数里最扎眼的三个：我们的 TRIM 落在原文 **Random 行**（56.75）而不是
+引导式行（65.87）；SD 上几乎不动（−1.75pp）；**TYPO 上显著为负**（−5.01pp，p=0.0045）——
+引导式剪枝不可能让「图上写着有害短语」的攻击变得更安全。
+
+同时确认两条次因：
+
+1. `llava-v1.5-7b-TRIM` 是 **fine-tuned with TRIM** 的 checkpoint（仓库 README 明写）。
+   原文 TRIM 行 MMBench 66.92 > Original 行 64.60，与 TRIM 原文 Table 1
+   （vanilla 64.3 / TRIM 微调 67.4）指纹吻合 ⇒ **原文那两行跨了模型**，
+   我们固定同一权重的两格测的是另一个量。
+2. 「只有 SD 基线对上 59.37」是**两个反向偏移抵消**的巧合：MM-SafetyBench 原文 SD=45.37 /
+   Typo=71.52（`mean=58.45`），而我们判官在 SD 偏高 +13.1pp、Typo 只偏高 +4.4pp。
+
+完整证据链与判定树：`experiments/t1_5_2026-10-27/README_诊断_2026-10-27.md`。
 
 **T0.4 结果**：32 层 `[1, 32, 596, 596]`，视觉 span `[5, 581)` 共 576 个 token，
 行和偏离 3.35e-04，峰值/均匀最高 32.73。**命题的生死线过了。**
@@ -142,7 +170,7 @@ python scripts/result_block.py parse results/inbox/
 
 报告：`results/REPORT_T0_2026-10-20.md`、`results/REPORT_T1.1_2026-10-20.md`。
 
-**本轮指令见 `TASKS.md`**（判官可重复性验证。只重判，不生成）。
+**本轮指令见 `TASKS.md`**（剪枝方向探针 + 符号修正四格。先跑 15 分钟探针，不过就别往下走）。
 
 ### ⚠ 2026-10-26 新发现：判官在实质相同的回答上给了相反判定
 
