@@ -74,6 +74,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="0=全部")
     ap.add_argument("--text-shuffle-n", type=int, default=30, help="文本敏感度只算前 N 条（慢）")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--cell-frac", type=float, default=0.15,
+                    help="按像素活动取最高的这个比例作为「载荷格」；0=关掉 cell 级读数")
     ap.add_argument("--query-src", default="template", choices=list(SRC_CHOICES),
                     help="TRIM 打分用的查询：template=模板问句（与历史格子可比）/ "
                          "keyphrase=官方 Key Phrase / changed=含关键词的原始问句 / dummy")
@@ -110,6 +112,9 @@ def main():
     acc = {k: [] for k in ("sim_diff", "jac_off_high", "jac_off_rand", "jac_text_swap",
                            "jac_text_empty", "jac_text_generic", "keep_frac_payload",
                            "keep_frac_other", "payload_highsim", "payload_random2",
+                           "sim_payload_cells", "sim_blank_cells",
+                           "kept_payload_cells_official", "kept_blank_cells_official",
+                           "kept_payload_cells_highsim", "kept_payload_cells_random",
                            "is_low_sim")}
     for i, (cat, qid, q, img_bytes) in enumerate(rows):
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -196,6 +201,42 @@ def main():
                 acc["keep_frac_payload"].append(rec["frac_payload_rows_kept"])
                 acc["keep_frac_other"].append(rec["frac_other_rows_kept"])
 
+                # ── cell 级（24×24 patch 逐个）载荷定位：行级太粗，
+                #    黑字只占行宽的一部分，行保留率会把「留白列」也算成保留 ──
+                if args.cell_frac > 0:
+                    cells = (px[0].permute(1, 2, 0).reshape(N, 14, N, 14, 3)
+                             .permute(0, 2, 1, 3, 4).reshape(N, N, -1))
+                    act = cells.std(dim=2).flatten().float()          # [576] 每格像素活动
+                    # 载荷格 = 明显比「空白画布基线」更活跃的格。
+                    # 不能用 quantile(act, 1-frac)：当载荷占比 < frac 时阈值会落进空白区，
+                    # 于是 pmask 会把 576 格全选中（Mac 侧合成图自检抓到过这个 bug）。
+                    med = act.median()
+                    mad = (act - med).abs().median()
+                    thr = med + 6.0 * mad
+                    pmask = act > thr
+                    n_cell = int(pmask.sum())
+                    if n_cell < 8 or n_cell > 200:      # 阈值退化 → 回退到固定 top-k
+                        kk = min(60, int(0.12 * act.numel()))
+                        pmask = torch.zeros_like(act, dtype=torch.bool)
+                        pmask[act.topk(kk).indices] = True
+                        rec["cell_thr_fallback"] = True
+                    pidx = set(int(x) for x in pmask.nonzero(as_tuple=False).flatten())
+                    bidx = set(range(sims.shape[0])) - pidx
+                    rec["n_payload_cells"] = len(pidx)
+                    rec["sim_payload_cells"] = float(sims[sorted(pidx)].mean())
+                    rec["sim_blank_cells"] = float(sims[sorted(bidx)].mean())
+                    rec["kept_payload_cells_official"] = len(keep_off & pidx) / len(pidx)
+                    rec["kept_blank_cells_official"] = len(keep_off & bidx) / len(bidx)
+                    rec["kept_payload_cells_highsim"] = len(k_hi & pidx) / len(pidx)
+                    rec["kept_payload_cells_random"] = len(k_rnd & pidx) / len(pidx)
+                    for k, v in (("sim_payload_cells", rec["sim_payload_cells"]),
+                                 ("sim_blank_cells", rec["sim_blank_cells"]),
+                                 ("kept_payload_cells_official", rec["kept_payload_cells_official"]),
+                                 ("kept_blank_cells_official", rec["kept_blank_cells_official"]),
+                                 ("kept_payload_cells_highsim", rec["kept_payload_cells_highsim"]),
+                                 ("kept_payload_cells_random", rec["kept_payload_cells_random"])):
+                        acc[k].append(v)
+
             acc["sim_diff"].append(rec["sim_diff"])
             acc["jac_off_high"].append(rec["jac_official_vs_highsim"])
             acc["jac_off_rand"].append(rec["jac_official_vs_random"])
@@ -234,6 +275,17 @@ def main():
             for name in ("pix", "sim", "keep"):
                 v = _np.mean([q["row_profile"][name] for q in pr], axis=0)
                 print(f"   行剖面 {name:<4}", " ".join(f"{x:7.3f}" for x in v))
+    if acc["sim_payload_cells"]:
+        ncells = [r["n_payload_cells"] for r in map(json.loads, open(out_path))
+                  if "n_payload_cells" in r]
+        print(f"\n6) cell 级载荷定位：每样本被判为载荷的格数 ≈ {np.mean(ncells):.0f}"
+              f"（{np.mean(ncells)/576:.1%} 的图）" if ncells else "\n6) cell 级读数不可用")
+        print(f"   相似度：载荷格 {m('sim_payload_cells')}  vs 留白格 {m('sim_blank_cells')}"
+              f"   ← 差值为负 = 载荷格更不像查询（模板查询下 TRIM 反向的证据）")
+        print(f"   保留率：official {m('kept_payload_cells_official')} / "
+              f"highsim {m('kept_payload_cells_highsim')} / random {m('kept_payload_cells_random')}"
+              f"  vs 留白格 official {m('kept_blank_cells_official')}"
+              f"   ← 基线 = keep 比例 0.25")
     resolver.report()
     print(f"\n逐样本明细 -> {out_path}")
 
