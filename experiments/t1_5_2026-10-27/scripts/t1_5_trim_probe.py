@@ -94,8 +94,8 @@ def main():
 
     fout = open(out_path, "w", encoding="utf-8")
     acc = {k: [] for k in ("sim_diff", "jac_off_high", "jac_off_rand", "jac_text_swap",
-                           "jac_text_empty", "jac_text_generic", "keep_frac_bottom_strip",
-                           "is_low_sim")}
+                           "jac_text_empty", "jac_text_generic", "keep_frac_payload",
+                           "keep_frac_other", "is_low_sim")}
     for i, (cat, qid, q, img_bytes) in enumerate(rows):
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         px = proc(images=img, return_tensors="pt")["pixel_values"].to(dev)
@@ -140,11 +140,31 @@ def main():
                     rec[f"jac_official_vs_text_{tag}"] = jaccard(keep_off, k2)
                     acc[f"jac_text_{tag}"].append(rec[f"jac_official_vs_text_{tag}"])
 
-            # ── TYPO：底部关键词条带（网格下方 1/4 行）被保留的比例 ──
+            # ── TYPO/ORIGINAL/BLACK：按「像素行」定位载荷，而不是假设它在底部 ──
+            #   重要：原版栈 image_aspect_ratio='pad' → expand2square 会把 1024×180 的
+            #   文字条**垂直居中**贴进 1024² 画布，落到网格中部而不是底部。
+            #   早期用「下方 1/4 行」当条带区是错的，读数 0.166 不能作为证据。
+            #   这里改成三行 24 个网格行的剖面：像素活动(高=有字) / 相似度 / 官方保留率，
+            #   直接看「有字的那几行被保留多少」，不需要先验假设位置。
             if args.split.upper() in ("TYPO", "ORIGINAL", "BLACK"):
-                strip = {r * N + c for r in range(int(N * 0.75), N) for c in range(N)}
-                rec["frac_strip_kept"] = len(strip & keep_off) / len(strip)
-                acc["keep_frac_bottom_strip"].append(rec["frac_strip_kept"])
+                prof = {"pix": [], "sim": [], "keep": []}
+                for r in range(N):
+                    blk = px[0, :, r * 14:(r + 1) * 14, :]           # [3,14,336]
+                    prof["pix"].append(float(blk.std().item()))
+                    rr = slice(r * N, (r + 1) * N)
+                    seg = sims[rr]
+                    prof["sim"].append(float(seg.mean().item()))
+                    prof["keep"].append(
+                        len({i - r * N for i in keep_off} & set(range(N))) / N)
+                rec["row_profile"] = prof
+                # 载荷行 = 像素活动最高的 6 行
+                top = sorted(range(N), key=lambda r: -prof["pix"][r])[:6]
+                rec["frac_payload_rows_kept"] = sum(prof["keep"][r] for r in top) / 6
+                rec["frac_other_rows_kept"] = (
+                    sum(prof["keep"][r] for r in range(N) if r not in top) / (N - 6))
+                rec["payload_rows"] = top
+                acc["keep_frac_payload"].append(rec["frac_payload_rows_kept"])
+                acc["keep_frac_other"].append(rec["frac_other_rows_kept"])
 
             acc["sim_diff"].append(rec["sim_diff"])
             acc["jac_off_high"].append(rec["jac_official_vs_highsim"])
@@ -172,9 +192,17 @@ def main():
     print(f"4) 文本敏感度 Jaccard(换文本后保留集不变): "
           f"empty={m('jac_text_empty')} generic={m('jac_text_generic')} swap={m('jac_text_swap')}"
           f"   ← ≈1.0 表示保留集几乎不随问题变")
-    if acc["keep_frac_bottom_strip"]:
-        print(f"5) TYPO 底部关键词条带被保留的 token 占比 = {m('keep_frac_bottom_strip')}"
-              f"   ← <0.25 表示条带被系统性删掉，直接解释 TYPO 上 ASR 显著下降")
+    if acc["keep_frac_payload"]:
+        print(f"5) 按像素活动定位的「载荷行」（有字的 6 行）官方保留率 = "
+              f"{m('keep_frac_payload')}  vs 其余行 {m('keep_frac_other')}"
+              f"   ← 保留率基线 = 0.25；载荷行明显<0.25 即关键词被系统性删掉")
+        pr = [r for r in (json.loads(l) for l in open(out_path)) if "row_profile" in r]
+        if pr:
+            import numpy as _np
+            k = pr[0]
+            for name in ("pix", "sim", "keep"):
+                v = _np.mean([q["row_profile"][name] for q in pr], axis=0)
+                print(f"   行剖面 {name:<4}", " ".join(f"{x:7.3f}" for x in v))
     print(f"\n逐样本明细 -> {out_path}")
 
 

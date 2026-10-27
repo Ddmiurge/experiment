@@ -21,6 +21,7 @@ import argparse
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import urllib.request
@@ -60,11 +61,14 @@ def call_llm(prompt, key, max_tokens=60):
     return raw, usage.get("completion_tokens")
 
 
-def judge(path, key, tag, raw_out_dir="/tmp"):
+def judge(path, key, tag, raw_out_dir="/tmp", raw_name=None):
     rows = [json.loads(l) for l in open(path)]
     per_cat = {c: {"safe": 0, "unsafe": 0} for c in CATEGORIES}
     verdicts, fails, levels = {}, [], []
-    raw_f = open(f"{raw_out_dir}/t1_5_judge_raw_{tag}.jsonl", "w", encoding="utf-8")
+    # 文件名必须唯一：tag 会在不同行（vanilla / TRIM-FT）之间重复，
+    # 用输入文件名做底避免互相覆盖（T1.5 首轮踩过）
+    stem = raw_name or os.path.splitext(os.path.basename(path))[0]
+    raw_f = open(f"{raw_out_dir}/t1_5_judge_raw_{stem}.jsonl", "w", encoding="utf-8")
     for i, r in enumerate(rows):
         cat = r["cat"]
         raw, ntok = call_llm(build_prompt(cat, r["answer"]), key)
@@ -84,7 +88,7 @@ def judge(path, key, tag, raw_out_dir="/tmp"):
     n = len(rows)
     nu = sum(c["unsafe"] for c in per_cat.values())
     return {"tag": tag, "path": path, "n": n, "per_cat": per_cat, "verdicts": verdicts,
-            "levels": levels, "asr": nu / n, "fails": fails,
+            "levels": levels, "asr": nu / n, "fails": fails, "raw_stem": stem,
             "asr_if_fail_unsafe": (nu + len(fails)) / n}
 
 
@@ -165,28 +169,30 @@ def main():
               + (f"（若失败按 unsafe 计则 ASR={s['asr_if_fail_unsafe']:.4f}）" if s["fails"] else ""))
         if len(s["fails"]) / max(1, s["n"]) > 0.005:
             print("   ⚠ 解析失败率 >0.5%，max_tokens=60 可能截断判官输出，查 "
-                  f"/tmp/t1_5_judge_raw_{tag}.jsonl 的 n_tokens 分布")
+                  f"/tmp/t1_5_judge_raw_{s['raw_stem']}.jsonl 的 n_tokens 分布")
 
     if not args.no_block:
+        mslug = re.sub(r"[^0-9a-zA-Z]+", "-", args.model_tag).lower().strip("-")
         for tag, s in res.items():
-            pruner = {"none": "none", "random": "Random"}.get(tag, tag)
+            # 文件名安全值：绝不放 "/"（result_block._clean 只压空白，
+            # 斜杠会进 slug → 结果块写文件时 FileNotFoundError）
+            sign = {"trim_official": "low_sim", "trim_highsim": "high_sim",
+                    "random": "random"}.get(tag, "na")
+            pruner = {"none": "none", "random": "Random"}.get(tag, "TRIM")
             result_block.emit(
-                exp=f"{args.exp_prefix}_{args.split.lower()}_{tag.replace('_','-')}",
+                exp=f"{args.exp_prefix}_{mslug}_{args.split.lower()}_{tag.replace('_','-')}",
                 levels=s["levels"],
                 cfg={"model": args.model_tag, "pruner": pruner,
                      "keep_ratio": "1.0" if tag == "none" else "0.25",
                      "attn": "eager", "decode": "greedy", "seed": "42",
-                     "split": args.split, "n": str(s["n"]),
-                     "prune_sign": ("official(low-sim)" if tag == "trim_official" else
-                                    "paper(high-sim)" if tag == "trim_highsim" else
-                                    "n/a")},
+                     "split": args.split, "n": str(s["n"]), "prune_sign": sign},
                 env={**result_block.fingerprint(),
                      "judge": "Qwen3-8B(non-thinking) official-protocol"},
                 extra={"asr": f"{s['asr']:.4f}",
                        "n_unsafe": str(sum(c['unsafe'] for c in s['per_cat'].values())),
                        **{f"asr_{c.lower()}":
                           f"{(v['unsafe']/(v['safe']+v['unsafe'])):.4f}"
-                          if (v['safe'] + v['unsafe']) else "n/a"
+                          if (v['safe'] + v['unsafe']) else "na"
                           for c, v in s['per_cat'].items()}},
                 out_dir=os.path.join(REPO, "results"), kind="asr")
 

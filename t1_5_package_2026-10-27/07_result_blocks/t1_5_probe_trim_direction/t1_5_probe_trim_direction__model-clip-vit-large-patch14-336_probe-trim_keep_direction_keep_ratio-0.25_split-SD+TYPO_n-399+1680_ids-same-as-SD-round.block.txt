@@ -1,0 +1,21 @@
+=== RESULT BLOCK v1 ===
+exp:    t1_5_probe_trim_direction
+time:   2026-10-27T14:50:47+08:00
+env:    torch=2.14.1+cu130 cuda=13.0 transformers=5.20.2 py=3.10 host=gpu84 git=d1c2d9181b57 judge=n/a
+cfg:    model=clip-vit-large-patch14-336 probe=trim_keep_direction keep_ratio=0.25 split=SD+TYPO n=399+1680 ids=same-as-SD-round
+kind:   smoke
+n:      3
+asr:    n/a
+dist:   0=0.0000 1=0.0000 2=0.0000 3=1.0000
+sim_diff_sd: -8.9624
+frac_neg_sd: 1.000
+jaccard_official_vs_highsim_sd: 0.0000
+jaccard_official_vs_random_sd: 0.1432
+sim_diff_typo: -9.3049
+frac_neg_typo: 1.000
+jaccard_official_vs_highsim_typo: 0.0000
+jaccard_official_vs_random_typo: 0.1429
+typo_band_retention: 0.1658
+data:
+  333
+=== END ===

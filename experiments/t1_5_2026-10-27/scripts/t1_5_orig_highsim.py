@@ -93,14 +93,18 @@ def token_reduction_highsim(self, image_features, all_image_features, text_featu
 
 
 def patch():
-    """只改内存里的类方法；third_party 磁盘文件一个字节都不动。"""
+    """只改内存里的类方法；third_party 磁盘文件一个字节都不动。
+
+    注意：普通函数直接赋给类属性即可成为方法（Python 描述符协议）。
+    **不要**用 types.MethodType(f, cls) —— 那会把「类」当成 self 绑进去，
+    实例调用时报 `type object 'CLIPVisionTower' has no attribute 'token_reduce_func'`
+    （T1.5 首轮踩过，服务器用 /tmp 包装器绕过）。
+    """
     sys.path.insert(0, TRIM_REPO)
-    import types
     from llava.model.multimodal_encoder import clip_encoder
     clip_encoder.CLIPVisionTower.token_reduction_official = \
         clip_encoder.CLIPVisionTower.token_reduction
-    clip_encoder.CLIPVisionTower.token_reduction = \
-        types.MethodType(token_reduction_highsim, clip_encoder.CLIPVisionTower)
+    clip_encoder.CLIPVisionTower.token_reduction = token_reduction_highsim
     print("[patch] CLIPVisionTower.token_reduction → highsim 版（原函数已存为 *_official）",
           flush=True)
 
