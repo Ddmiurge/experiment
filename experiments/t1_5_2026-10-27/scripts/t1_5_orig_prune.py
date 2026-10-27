@@ -32,6 +32,9 @@ import sys
 import numpy as np
 import torch
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from msb_queries import SRC_CHOICES, QueryResolver, load_official
+
 REPO = os.environ.get("REPO", "/home/huangqixu01/experiment")
 TRIM_REPO = os.path.join(REPO, "third_party/trim")
 MODEL_PATH = os.environ.get("TRIM_M", "/home/huangqixu01/models/llava-v1.5-7b-TRIM")
@@ -40,6 +43,7 @@ KEEP = os.environ.get("TRIM_KEEP", "0.25")
 SEED = 42
 MODE = "highsim"          # 由 --prune 设置；patch 进去的函数读它
 KEEP_LOG = []             # highsim/random 模式下由 token_reduction_mode 填充
+_RNG = None               # random 模式的逐样本掩码；main 里初始化一次（不能每次调用重建）
 
 
 # ── 与官方 clip_encoder.py L67–L142 同结构，只把「选哪 144 个」换成按 MODE 决定 ──
@@ -58,7 +62,10 @@ def token_reduction_mode(self, image_features, all_image_features, text_features
     token_mask = torch.zeros(batch_size, tokens_number, device=image_features.device,
                              dtype=torch.bool)
     if MODE == "random":
-        rng = np.random.default_rng(SEED)
+        global _RNG
+        if _RNG is None:                       # ← 全进程只建一次，逐样本推进 ⇒ 掩码互不相同
+            _RNG = np.random.default_rng(SEED)
+        rng = _RNG
         for b in range(batch_size):
             idx = rng.choice(tokens_number, num_tokens_to_keep, replace=False)
             token_mask[b, idx] = True
@@ -95,7 +102,7 @@ def token_reduction_mode(self, image_features, all_image_features, text_features
 
     if MODE in ("highsim", "random"):        # 留档保留集，供「载荷行命中」等机制读数
         KEEP_LOG.append(sorted(int(x) for x in
-                               token_mask[0].nonzero(as_tuple=True)[1].tolist()))
+                               token_mask[0].nonzero(as_tuple=False).flatten().tolist()))
 
     actual_dims = [num_tokens_to_keep + 1] * batch_size
     image_features = selected_image_features
@@ -140,6 +147,11 @@ def main():
     ap.add_argument("--conv", default="vicuna_v1")
     ap.add_argument("--max-new-tokens", type=int, default=512)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--query-src", default="template", choices=list(SRC_CHOICES),
+                    help="只控制喂给 TRIM 打分的 texts=；模型的 prompt 始终是模板问句，"
+                         "否则就同时改了下攻击本体")
+    ap.add_argument("--msb-json", default=os.path.join(REPO, "third_party/mm-safetybench/"
+                                                      "data/processed_questions"))
     args = ap.parse_args()
     MODE = args.prune
 
@@ -159,7 +171,17 @@ def main():
     if args.ids_from:
         want = load_ids(args.ids_from)
         rows = [r for r in rows if (r[0], int(r[1])) in want]
-    print(f"样本 {len(rows)} 条（{args.data}，split={args.split}，prune={args.prune}）", flush=True)
+    resolver = None
+    if args.query_src not in ("template", "dummy"):
+        resolver = QueryResolver(load_official(args.msb_json), args.query_src)
+    print(f"样本 {len(rows)} 条（{args.data}，split={args.split}，prune={args.prune}，"
+          f"query_src={args.query_src}）", flush=True)
+
+    def trim_text(q, cat=None, qid=None):
+        """喂给 TRIM 的查询。默认与模型的 prompt 同一个字符串（与历史格子可比）。"""
+        if resolver is None:
+            return q if args.query_src == "template" else ("a photo." if args.query_src == "dummy" else q)
+        return resolver.resolve(cat, qid, q)
 
     cfg = AutoConfig.from_pretrained(MODEL_PATH)
     cfg.mm_vision_tower = CLIP_PATH
@@ -180,7 +202,7 @@ def main():
             img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
             px = process_images([img], image_processor, model.config).to("cuda:0",
                                                                           dtype=torch.float16)
-            feats, dims = vt(px, [q])
+            feats, dims = vt(px, [trim_text(q, cat, qid)])
             print(f"  [自检 {cat}#{qid}] 剪枝后特征 {tuple(feats.shape)} · "
                   f"actual_dims={dims[:2]} · 图像原尺寸 {img.size}", flush=True)
             expect = 576 if args.prune == "none" else int(576 * float(KEEP)) + 1
@@ -205,10 +227,12 @@ def main():
             output_ids = model.generate(
                 input_ids, images=img_tensor.to("cuda:0", dtype=torch.float16),
                 image_sizes=[img.size], do_sample=False,
-                max_new_tokens=args.max_new_tokens, texts=[q])
+                max_new_tokens=args.max_new_tokens,
+                texts=[trim_text(q, cat, qid)])
         ans = tokenizer.decode(output_ids[0], skip_special_tokens=True).split(
             conv.roles[1] + ":")[-1].strip()
-        fout.write(json.dumps({"cat": cat, "qid": qid, "question": q, "answer": ans},
+        fout.write(json.dumps({"cat": cat, "qid": qid, "question": q, "answer": ans,
+                               "trim_query": trim_text(q, cat, qid)},
                               ensure_ascii=False) + "\n")
         fout.flush()
         if fkeep is not None:
@@ -218,9 +242,15 @@ def main():
             fkeep.flush()
         if (i + 1) % 20 == 0:
             print(f"[{i+1}/{len(rows)}]", flush=True)
+    if resolver is not None:
+        resolver.report()
     fout.close()
     if fkeep is not None:
         fkeep.close()
+    if fkeep is not None:
+        uniq = len({frozenset(json.loads(l)["keep"]) for l in open(keep_out)})
+        print(f"[自检] {keep_out} 里不同掩码种类 = {uniq}（应≈样本数；=1 说明掩码没逐样本独立）",
+              flush=True)
     print(f"完成 -> {out}", flush=True)
 
 

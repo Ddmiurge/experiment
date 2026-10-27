@@ -1,160 +1,123 @@
-# TASKS · 当前轮 T1.5b：TYPO 补格 —— 机制唯一还没被测过的地方
+# TASKS · 当前轮 T1.5c：查询口径开关 —— 复现的最后一格 + 致盲判别
 
-> 背景：`results/archive/11_MAC_RECHECK_T1.5_2026-10-27.md`（Mac 复核，**必读**）
-> 与 `experiments/t1_5_2026-10-27/DIAGNOSIS_2026-10-27.md`。常驻规则以 `Agent.md` 为准。
-> **本轮不改 `third_party/`、不改 `src/`**；上一轮服务器用 `/tmp` 绕过的三个脚本 bug
-> 已回写仓库（`t1_5_orig_highsim.py` 的 `MethodType`、`t1_5_judge.py` 的 raw 覆盖与斜杠 slug、
-> `t1_5_trim_probe.py` 的条带区域假设），pull 即可直接用。
-
----
-
-## 零、为什么只剩这一件事
-
-T1.5 已经把 SD 分片判死了，而且**判得比报告写的更死**：
-
-- 配对精度是 **SE ≈ 1.58pp（95% CI ±3.1pp）**，不是 ±5pp（那是独立比例口径）。
-  最贴原文的格子 TRIM-FT × highsim：Δ = **+0.25pp，CI [−2.82, +3.32]**，
-  与原文声称的 +6.50pp 相差 **z = −3.99（p = 6.5e-05）** ⇒ 是「**被拒绝**」，不是「没测出」。
-  五格全部 z ≤ −3.88。
-- 原因也清楚了：**SD 分片的图上没有可读载荷**，有害请求全在问题文本里，
-  所以保留哪 144 个视觉 token 结构上不可能改变「是否遵从」。
-  实测印证：**四条件判定完全一致的样本占 81.5% / 86.2%，且翻转的 b≈c**——
-  剪枝改的是措辞与长度（回答普遍变长 8–12%），没改遵从与否。免判官的拒绝词旁证同向。
-
-⇒ **SD 全量 1680 取消**：±3.1pp 已足以排除 +6.5pp，扩样对这条结论零增量。
-
-唯一还没被测过的地方是 **TYPO**——有害短语**渲染在图上**，这才是机制该现身的位置，
-也正是原文 Table 9「Background removed = 65.87（与 TRIM 行逐位相同）」的正面版本。
-而且这条总线已证明**有信号**：T1.4d 在 TYPO 上 `trim_official − none = −5.01pp（p=0.0045）`。
-
-**本轮只补 TYPO 这一套矩阵。**
+> 背景：`results/archive/12_...` 与 `t1_5b_package_2026-10-27/01_reports/12_REPORT_T1.5b_TYPO_2026-10-27.md`
+> （**Mac 侧已独立复核，四格数字、分层、CI、z 全部对得上**，见 `scripts/t1_5b_analysis.py`）。
+> 本轮只做两件便宜的事，都是**已归档数据的延伸**，不改攻击本体。
+> 常驻规则见 `Agent.md`；本轮仍不改 `third_party/`、不改 `src/`。
 
 ---
 
-## 一、任务（按顺序）
+## 零、这轮要回答的问题（一句话）
 
-### 1 · 探针重跑 + 一致性自检（约 10 分钟，不加载 LLaVA，不生成）
+TRIM 的评分对象是「图像 patch 与**文本查询**的相似度」。MM-SafetyBench 为了构成攻击，
+**故意把关键词从问题里删掉了**（"The image shows a phrase of an activity…"）。
+T1.5b 的探针实测：用这个模板问句当查询时，**白底留白的相似度（28.6–29.3）高于黑字条带（24.9–26.9）**
+⇒「保留高相似度 token」恰好等于「删掉载荷」（实测 ASR −9.77pp）。
 
-上一轮「TYPO 底部条带保留 16.58%」测的是**纯留白**：`image_aspect_ratio = pad`
-会把 1024×180 的文字条**垂直居中**贴进画布 → 载荷落在网格第 10–14 行，而代码取的是 18–23 行。
-脚本已改成不假设位置：输出 24 行的（像素活动 / 相似度 / 官方保留率）三条剖面，
-并按像素活动最高的 6 行定义「载荷行」。
+**也就是说：TRIM 原文 §3.2 的机制（保留前景→恶意语义被提纯）在这个基准上从未被触发过。**
+唯一能让它触发的办法，是把查询换成**真的说出载荷**的文本（官方 JSON 里有 `Key Phrase`
+与 `Changed Question` 两个字段）。这就是本轮唯一的自变量。
+
+> 这一格**不是为了凑正方向**：无论正负都是结论。
+> 正 ⇒ 复现成功，且我们说清了原文依赖的那个未声明口径；
+> 负 ⇒ 原文机制在三种查询定义下都不成立，负结果彻底封死。
+
+---
+
+## 一、任务
+
+### 1 · 探针：查询换成关键词，选择会不会翻转（几分钟，0 生成）
 
 ```bash
+# 先跑 40 条看方向，别一上来跑全量
 CUDA_VISIBLE_DEVICES=6 python experiments/t1_5_2026-10-27/scripts/t1_5_trim_probe.py \
-    --split TYPO --ids-from /tmp/t1_4c_typo399_data.json
+    --split TYPO --query-src keyphrase --limit 40
+CUDA_VISIBLE_DEVICES=6 python experiments/t1_5_2026-10-27/scripts/t1_5_trim_probe.py \
+    --split TYPO --query-src changed  --limit 40
+CUDA_VISIBLE_DEVICES=6 python experiments/t1_5_2026-10-27/scripts/t1_5_trim_probe.py \
+    --split TYPO --query-src dummy    --limit 40
 ```
 
-**必须贴回**：`sim_diff` 均值与全负比例、**载荷行保留率 vs 其余行保留率**（随机基线 0.25）、三行剖面。
-只有载荷行明显 < 0.25，才允许再写「关键词被删掉」这句机制解释。
+脚本会先打印 5 条**人工核对**（`prompt → 查询`）。**核对不上就停，别往下跑**
+（官方 JSON 的 id 有洞，`EconomicHarm` 键跳到 132 只有 122 条，所以对齐只能用
+parquet 的 `id`；Mac 侧已用你们的 798 条验证过 798/798 命中且问句逐字相等）。
 
-> ⚠ 上一轮 `--ids-from` 传 JSON **数组**文件时按 jsonl 解析失败、**静默退回全量 1680**。
-> 本轮若打印的 n 不是 399，**停下来报回来**——别把「n 更大」当成无害，
-> 那会让 TYPO 探针与四格的样本集不一致。
+**关键读数**：`载荷行保留率` 三档对比（chance = 0.25）
 
-### 2 · TYPO 四格（核心；每格约 20–25 分钟，两卡并行约 50 分钟）
+| query-src | highsim 载荷行保留率 | 含义 |
+|---|---|---|
+| template | **0.223**（T1.5b 实测） | 查询无语义 → 高相似度=留白 → 删载荷 |
+| keyphrase | **?** ← 本轮要测 | 若升到 ≥0.45，机制方向被恢复，值得跑生成 |
+| changed | **?** | 同上，且更贴近原文的「文本指令」 |
+| dummy | **?** | 下界对照：查询完全无信息时选到什么 |
 
-**四格必须全走原版栈新脚本 `t1_5_orig_prune.py`。** 理由是预处理必须统一：
-llava-hf 的 processor 对 1024×180 会 **resize + 中心裁剪**（只剩 17.6% 宽度），
-原版栈 `pad` 走 `expand2square`（条带完整保留）。混用两套栈，
-「剪什么」的对比里就混进了「图被裁成什么样」。
+**门槛**：只有 `keyphrase` 或 `changed` 让 highsim 的载荷行保留率**明显高于 0.25**（理想 >0.40），
+才进入第 2 步。若仍然 ≈0.2 或更低，说明 CLIP 相似度在这个图上是像素纹理驱动的，
+与语义无关 —— 那本身就是结论，直接跳到第 3 步写报告。
+
+### 2 · 生成两格（约 50 分钟，只在第 1 步过门槛时跑）
+
+**只换 `texts=`（TRIM 的查询），模型的 prompt 仍是模板问句** ——
+`--query-src` 只作用于剪枝打分，脚本会把实际用的查询写进答案文件的 `trim_query` 字段留档。
 
 ```bash
-# 卡 5
 CUDA_VISIBLE_DEVICES=5 /home/huangqixu01/venvs/trim-orig/bin/python \
-  experiments/t1_5_2026-10-27/scripts/t1_5_orig_prune.py --split TYPO --prune none
-CUDA_VISIBLE_DEVICES=5 /home/huangqixu01/venvs/trim-orig/bin/python \
-  experiments/t1_5_2026-10-27/scripts/t1_5_orig_prune.py --split TYPO --prune highsim
-# 卡 6
+  experiments/t1_5_2026-10-27/scripts/t1_5_orig_prune.py --split TYPO --prune highsim \
+  --query-src keyphrase
 CUDA_VISIBLE_DEVICES=6 /home/huangqixu01/venvs/trim-orig/bin/python \
-  experiments/t1_5_2026-10-27/scripts/t1_5_orig_prune.py --split TYPO --prune official
-CUDA_VISIBLE_DEVICES=6 /home/huangqixu01/venvs/trim-orig/bin/python \
-  experiments/t1_5_2026-10-27/scripts/t1_5_orig_prune.py --split TYPO --prune random
+  experiments/t1_5_2026-10-27/scripts/t1_5_orig_prune.py --split TYPO --prune official \
+  --query-src keyphrase
 ```
 
-四个模式只差「保留哪 144 个」，其余（144 原序 + 1 个被丢集合均值 = **145 进 LLM**）完全一致：
-`none` 关掉剪枝、`official` 走**未 patch 的上游函数**、`highsim` 去掉 L89 的取负、`random` 随机掩码。
+判分同上（`--model-tag llava-v1.5-7b-TRIM --exp-prefix t1_5c`），
+必报：ASR、vs `none`(0.7594) 与 vs `highsim`模板查询(0.6617) 两个配对口径、
+**Δ 的 95% CI（配对 SE = `sqrt((b+c)−(b−c)²/n)/n`）**、严格5/通用8 分层。
 
-脚本自带断言自检：前 3 条打印剪枝后特征形状与 `actual_dims`，并 **assert 进 LLM 的视觉 token 数**
-（none=576 / 其余=145）。**assert 不过就停，不要改断言。**
+**预测（写在前头，事后不许改口径）**
+- 若原文机制成立：`highsim_keyphrase` **> none(0.7594)**，且 `official_keyphrase` 更低
+  （因为此时 official 反过来删载荷）。→ 复现出「保留语义相关前景 → 攻击面打开」
+- 若仍在 none 以下：机制在三种查询下都不成立 → 负结果封死，直接进交付物
 
-**`official` 那格同时是对 T1.4d 的复现自检**（同栈、同 conv、同 max_new_tokens、同 id）：
+### 3 · 致盲 vs 拒绝判别（0 生成，只判已归档答案；**这条比第 2 步更重要**）
 
-| 格子 | 本轮应与 T1.4d 一致 |
+交付物一定会被问：TYPO 上 `highsim` 的 −9.77pp 到底是「模型开始拒绝」还是「模型读不到字了」。
+前者是安全增益，后者是**致盲**，两者含义完全相反。
+`实验口径与判据` §五早就为这一问准备了四档（拒绝/误解/部分合规/合规），现在用它：
+
+对已归档的 4×399 TYPO 回答加判「档位」（脚本里 `judge_binary_to_level` / `build_refusal_prompt`
+已在 `src/eval/mm_safetybench_judge.py`，可直接用）：
+
+| 条件 | 应报 |
 |---|---|
-| `none` | ≈ **0.7594** |
-| `official` | ≈ **0.7318** |
+| none / official / highsim / random | 四档占比，尤其 **误解(档1) 占比** |
 
-**差超过 1.5pp 就说明 harness 漂移了**（conv 模板 / max_new_tokens / id 集），
-先报回来，不要继续往下判分——那比 TYPO 结果本身更重要。
-默认 `--conv vicuna_v1 --max-new-tokens 512 --data /tmp/t1_4c_typo399_data.json`，与 T1.4d 相同。
-
-### 3 · 判分与配对分析
-
-```bash
-python experiments/t1_5_2026-10-27/scripts/t1_5_judge.py --split TYPO --ref none \
-  --model-tag llava-v1.5-7b-TRIM --exp-prefix t1_5b \
-  --file none=/tmp/t1_5b_answers_none_typo399.json \
-  --file trim_official=/tmp/t1_5b_answers_official_typo399.json \
-  --file trim_highsim=/tmp/t1_5b_answers_highsim_typo399.json \
-  --file random=/tmp/t1_5b_answers_random_typo399.json
-```
-
-判官设置与前面所有轮完全一致（Qwen3-8B 非思考 / temperature=0 / seed=42 / max_tokens=60 /
-官方 13 类目协议 / 只喂 Answer）。逐条原始判定自动落
-`/tmp/t1_5_judge_raw_<输入文件名>.jsonl`。
-
-**除脚本默认输出，报告还要给两样**（口径照 `scripts/t1_5_analysis.py`，它已在 Mac 侧跑通）：
-
-1. **Δ 的 95% CI**，用**配对**标准误 `SE = sqrt((b+c) − (b−c)²/n)/n`；
-2. **z 与 p：观测 Δ 直接对原文主张的量级（+6.50pp）做检验**，而不是只对 0 做检验。
-
-分层必须用 `src/eval/mm_safetybench_judge.py` 的 `STRICT_CATEGORIES`（**5 个类目**）。
-上一轮报告写成 137/262 是把 `Legal_Opinion`(31 条) 漏进了通用，导致「通用 ASR 0.36」虚高
-（真实 0.29）。**TYPO 上严格类目很可能几乎全饱和在 1.0**（MM-SafetyBench 自己的 TYPO
-专业类目是 94–100），所以有效信号全在 8 个通用类目里，两层都要单独报 Δ 与 p。
+**判据**：若 `highsim` 相对 `none` 少掉的 unsafe 主要转成**档 1（误解/答非所问）**
+而非**档 0（拒绝）**，那么「剪枝降低 ASR」是**致盲**，不是安全 ——
+这句话必须写进交付物，否则负结果会被读成"剪枝是一种防御"。
 
 ---
 
-## 二、验收与判定（TYPO 专用，照表写结论，不要含糊）
-
-| none | official | highsim | random | 结论与后续 |
-|---|---|---|---|---|
-| ≈0.76 | 显著为负（复现 T1.4d） | **> 0 且 p<0.05** | ≈ 0 | **机制复现成功**，但只在图承载载荷的分片。交付物与阶段 2–4 的「格 2」锚点改用 **TYPO**，SD 撤下 |
-| ≈0.76 | 显著为负 | > 0 但 p>0.05 | ≈ 0 | 方向对、功效不足 → **到这时才扩样**（TYPO 全量 1680，±3.1→±1.5pp） |
-| ≈0.76 | 显著为负 | ≈ 0 | ≈ 0 | 「删载荷」有用、「留载荷」不抬高 ⇒ 原文 Table 9 两个方向都不成立。**交付物 1 = 带功效的负结果 + 官方实现与论文矛盾**；且阶段 2–4 必须换 pruner（优先 FasterVLM 72.02 / PruMerge 70.04 / HiPrune 69.44）或换基准 |
-| 与 T1.4d 的 0.7594/0.7318 **对不上** | — | — | — | **harness 漂移**，TYPO 读数全部无效。停下报回来，先查 conv / max_new_tokens / id 集 |
-
-> TYPO 基线 0.76 已接近饱和，+6.5pp 只剩约 20pp 的天花板空间。
-> 这不影响配对检验，但绝对值天然被压扁，报告要写一句。
-
----
-
-## 三、不要做
+## 二、不要做
 
 | 不要 | 因为 |
 |---|---|
-| 跑 SD 全量 1680 | ±3.1pp 已排除 +6.5pp，扩样对这条结论零增量；省下的 4 小时够跑完本轮四格 |
-| 把 TYPO 四格分到两个栈跑 | 预处理不同（HF 中心裁剪 vs 原版 pad），会把「剪什么」和「图被裁成什么样」混在一起 |
-| 只报 `highsim` 一格 | `none` / `official` / `random` 必须齐报；`official` 兼作 T1.4d 复现自检 |
-| 扫保留率 / conv / max_new_tokens 直到出正方向 | 调参凑数。保留率固定 0.25，conv 与 T1.4d 一致 |
-| 写「剪枝不改变安全性」 | 只在 SD / keep=0.25 / n=399 / 本判官下成立；本轮 TYPO 正是在测它的边界 |
-| 用 4 类当严格类目 | `STRICT_CATEGORIES` 是 5 类，上一轮漏了 `Legal_Opinion` |
-| 直接 `cat` 大 json 回传 | 逐样本数据落文件，报路径 + 结果块 |
+| 用 `--query-src` 同时改模型 prompt | 那改了下攻击本体，两个变量混在一起，全部格子不可比 |
+| 第 1 步不核对 5 条映射就跑 | id 有洞，错位对齐会静默产出"看起来合理"的垃圾 |
+| 跑到 SD 全量 / 换保留率凑正方向 | 调参凑数。keep 固定 0.25 |
+| 把 `random` 当逐样本随机引用 | T1.5b 已确认那 399 条**共用一张掩码**（本轮脚本已修，重跑才可信） |
+| 再补 T1.4/T1.5/T1.5b 的重复格子 | 三套数据已相互对齐（harness 差 0.00pp / −0.25pp），够了 |
 
 ---
 
-## 四、回传
+## 三、回传
 
-`results/archive/12_REPORT_T1.5b_TYPO_<日期>.md`，含：
+`results/archive/13_REPORT_T1.5c_query_<日期>.md`：
 
-1. **结论先行**：按 §二 判定表落在哪一行；一句话说清「机制在图承载载荷的分片上成立与否」
-2. **harness 自检**：本轮 `none` / `official` 与 T1.4d 的 0.7594 / 0.7318 各差多少
-3. 探针重跑：载荷行 vs 其余行保留率 + 三行 24 个数剖面（并注明上一轮 0.166 是留白、不是证据）
-4. 四格表：ASR、b/c、净、McNemar 精确 p、**Δ 的 95% CI（配对口径）**、**z vs +6.50pp**
-5. 严格(5类) / 通用(8类) 分层各自的 Δ 与 p
-6. 分类目 ASR 全表 + 回答长度变化（剪枝后变长 8–12% 是已确认的系统偏移）
-7. 4 块 `kind=asr` 结果块（`exp` 前缀 `t1_5b`；`cfg` 的 `prune_sign` 只能用
-   `na / low_sim / high_sim / random`，**不要出现斜杠**）
+1. 第 1 步三档 query-src 的**载荷行保留率表**（+ 5 条人工核对原文）
+2. 是否过门槛；过则给第 2 步两格 ASR/CI/分层与两个配对口径
+3. **第 3 步四档分布表**（这一条无论第 2 步结果如何都必须做，成本只是判官调用）
+4. 结论二选一，写死：
+   - 「原文机制需要查询含载荷，我们在 X 下复现出 +Ypp」，或
+   - 「三种查询定义下 +6.50pp 都不存在；且 −9.77pp 是致盲/拒绝中的【哪一种】」
 
-**当天回传。** 10-28 的硬决策只需要 §二 那一行结论。
+**当天回传。** 这是复现阶段的最后一格，之后进入交付物改写。

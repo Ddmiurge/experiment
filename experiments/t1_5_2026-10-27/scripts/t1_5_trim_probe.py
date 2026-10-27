@@ -22,11 +22,15 @@ import glob
 import io
 import json
 import os
+import sys
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from msb_queries import SRC_CHOICES, QueryResolver, load_official
 
 REPO = os.environ.get("REPO", "/home/huangqixu01/experiment")
 CLIP = os.environ.get("CLIP_PATH", "/home/huangqixu01/models/clip-vit-large-patch14-336")
@@ -70,6 +74,11 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="0=全部")
     ap.add_argument("--text-shuffle-n", type=int, default=30, help="文本敏感度只算前 N 条（慢）")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--query-src", default="template", choices=list(SRC_CHOICES),
+                    help="TRIM 打分用的查询：template=模板问句（与历史格子可比）/ "
+                         "keyphrase=官方 Key Phrase / changed=含关键词的原始问句 / dummy")
+    ap.add_argument("--msb-json", default=os.path.join(REPO, "third_party/mm-safetybench/"
+                                                      "data/processed_questions"))
     args = ap.parse_args()
     out_path = args.out or f"/tmp/t1_5_probe_{args.split.lower()}.jsonl"
 
@@ -87,6 +96,11 @@ def main():
     rows = load_rows(args.split, args.ids_from)
     if args.limit:
         rows = rows[:args.limit]
+
+    official = load_official(args.msb_json) if args.query_src not in ("template", "dummy") else None
+    resolver = QueryResolver(official, args.query_src)
+    if args.query_src not in ("template", "dummy") and not official:
+        raise SystemExit(f"❌ 官方 JSON 目录为空或不存在：{args.msb_json}")
     print(f"[probe] 样本 {len(rows)} 条", flush=True)
 
     N = clip.vision_model.config.image_size // clip.vision_model.config.patch_size  # 24
@@ -95,7 +109,8 @@ def main():
     fout = open(out_path, "w", encoding="utf-8")
     acc = {k: [] for k in ("sim_diff", "jac_off_high", "jac_off_rand", "jac_text_swap",
                            "jac_text_empty", "jac_text_generic", "keep_frac_payload",
-                           "keep_frac_other", "is_low_sim")}
+                           "keep_frac_other", "payload_highsim", "payload_random2",
+                           "is_low_sim")}
     for i, (cat, qid, q, img_bytes) in enumerate(rows):
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         px = proc(images=img, return_tensors="pt")["pixel_values"].to(dev)
@@ -105,7 +120,9 @@ def main():
             vout = clip.vision_model(px, output_hidden_states=True)
             feats = vout.hidden_states[SELECT_LAYER][:, 1:].float()          # [1,576,1024]
             proj = clip.visual_projection(clip.vision_model.post_layernorm(feats))  # [1,576,768]
-            t_in = text_tok(text=[q], return_tensors="pt", truncation=True, padding=True).to(dev)
+            query = resolver.resolve(cat, qid, q)      # ← 唯一被 --query-src 控制的地方
+            t_in = text_tok(text=[query], return_tensors="pt", truncation=True,
+                            padding=True).to(dev)
             sims = torch.matmul(proj, text_tower(**t_in).text_embeds.unsqueeze(2)).squeeze(2)  # [1,576]
             sims = sims[0]
 
@@ -159,7 +176,20 @@ def main():
                 rec["row_profile"] = prof
                 # 载荷行 = 像素活动最高的 6 行
                 top = sorted(range(N), key=lambda r: -prof["pix"][r])[:6]
+                # 同一套打分下再算 highsim / random 的载荷行保留率，保证三者同源可比
+                k_hi = set(torch.topk(sims, n_keep).indices.tolist())
+                k_rnd = set(int(x) for x in np.random.default_rng(1000 + i).choice(
+                    sims.shape[0], n_keep, replace=False))
+                for nm, ss in (("highsim", k_hi), ("random2", k_rnd)):
+                    rec[f"frac_payload_kept_{nm}"] = sum(
+                        1 for idx in top for c in range(N) if idx * N + c in ss) / (6 * N)
+                    rec[f"frac_blank_kept_{nm}"] = sum(
+                        1 for r0 in range(N) if r0 not in top for c in range(N)
+                        if r0 * N + c in ss) / ((N - 6) * N)
+                    acc[f"payload_{nm}"].append(rec[f"frac_payload_kept_{nm}"])
                 rec["frac_payload_rows_kept"] = sum(prof["keep"][r] for r in top) / 6
+                rec["frac_blank_rows_kept"] = sum(
+                    prof["keep"][r] for r in range(N) if r not in top) / (N - 6)
                 rec["frac_other_rows_kept"] = (
                     sum(prof["keep"][r] for r in range(N) if r not in top) / (N - 6))
                 rec["payload_rows"] = top
@@ -193,8 +223,9 @@ def main():
           f"empty={m('jac_text_empty')} generic={m('jac_text_generic')} swap={m('jac_text_swap')}"
           f"   ← ≈1.0 表示保留集几乎不随问题变")
     if acc["keep_frac_payload"]:
-        print(f"5) 按像素活动定位的「载荷行」（有字的 6 行）官方保留率 = "
-              f"{m('keep_frac_payload')}  vs 其余行 {m('keep_frac_other')}"
+        print(f"5) 按像素活动定位的「载荷行」（有字的 6 行）保留率："
+              f"official={m('keep_frac_payload')} highsim={m('payload_highsim')} "
+              f"random={m('payload_random2')}  vs 留白行 official={m('keep_frac_other')}"
               f"   ← 保留率基线 = 0.25；载荷行明显<0.25 即关键词被系统性删掉")
         pr = [r for r in (json.loads(l) for l in open(out_path)) if "row_profile" in r]
         if pr:
@@ -203,6 +234,7 @@ def main():
             for name in ("pix", "sim", "keep"):
                 v = _np.mean([q["row_profile"][name] for q in pr], axis=0)
                 print(f"   行剖面 {name:<4}", " ".join(f"{x:7.3f}" for x in v))
+    resolver.report()
     print(f"\n逐样本明细 -> {out_path}")
 
 

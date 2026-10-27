@@ -127,7 +127,9 @@ python scripts/result_block.py parse results/inbox/
 | T1.3 判官 | ✅ 官方协议 + Qwen3-8B；100 条 ASR 58.00%（原文 59.37） |
 | **T1.4 系列（四轮）** | ❌ 均未复现方向（目标 Table 2 MM-Safety 列 59.37→65.87）。**10-27 更新：原因已定位，见下** |
 | **T1.5（已跑完）** | ✅ 探针 + 五格 + 判官 A/B。**结论：官方代码方向与原文相反（证实）；符号修正后 SD 上 +6.5pp 被拒绝（z=−3.99, p=6.5e-05）**。复核见 `results/archive/11_MAC_RECHECK_T1.5_2026-10-27.md` |
-| **T1.5b（当前轮）** | ⏳ 只剩一处空缺：**TYPO × highsim/random**（图承载载荷的分片才是机制该现身处）。**指令见 `TASKS.md`** |
+| **T1.5b（已跑完）** | ❌ **TYPO 上两个方向都是负的**：none 0.7594 / official −3.01pp / **highsim −9.77pp（p<1e-4）** / random −3.01pp。harness 自检差 0.00/−0.25pp（有效）。
+  Mac 侧已独立复核全部数字（`scripts/t1_5b_analysis.py`）。**派生对照**：留载荷 vs 删载荷 = **+6.77pp [2.40,11.14]，p=0.0036** —— 载荷 token 确有因果杠杆，只是方向与原文相反 |
+| **T1.5c（当前轮）** | ⏳ 最后一个自变量：**TRIM 的查询文本**（模板问句 vs 官方 Key Phrase vs 原始问句）+ 致盲/拒绝四档判别。**指令见 `TASKS.md`** |
 
 ### ⚠ 2026-10-27：「配置对了、效应不存在」这个结论被推翻
 
@@ -171,8 +173,7 @@ F.softmax(similarities, dim=-1) → topk(largest=True)   # L90/L111 → 保留�
 
 报告：`results/REPORT_T0_2026-10-20.md`、`results/REPORT_T1.1_2026-10-20.md`。
 
-**本轮指令见 `TASKS.md`**（T1.5b：TYPO 四格 —— 唯一还没被测过的机制边界。
-约 50 分钟，含对 T1.4d TYPO 两格的复现自检）。
+**本轮指令见 `TASKS.md`**（T1.5c：查询口径开关 + 致盲判别。探针几分钟，0 生成起步）。
 
 ### ⚠ 2026-10-26 新发现：判官在实质相同的回答上给了相反判定
 
