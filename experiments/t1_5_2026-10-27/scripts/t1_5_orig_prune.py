@@ -155,8 +155,9 @@ def main():
     args = ap.parse_args()
     MODE = args.prune
 
-    out = args.out or f"/tmp/t1_5b_answers_{args.prune}_{args.split.lower()}399.json"
-    keep_out = f"/tmp/t1_5b_keeps_{args.prune}_{args.split.lower()}399.jsonl"
+    qsfx = "" if args.query_src == "template" else f"_{args.query_src}"
+    out = args.out or f"/tmp/t1_5c_answers_{args.prune}{qsfx}_{args.split.lower()}399.json"
+    keep_out = out.replace("_answers_", "_keeps_").replace(".json", ".jsonl")
     apply_patch(args.prune)
 
     from llava.model.builder import load_pretrained_model
@@ -172,7 +173,7 @@ def main():
         want = load_ids(args.ids_from)
         rows = [r for r in rows if (r[0], int(r[1])) in want]
     resolver = None
-    if args.query_src not in ("template", "dummy"):
+    if args.query_src in ("keyphrase", "changed"):
         resolver = QueryResolver(load_official(args.msb_json), args.query_src)
     print(f"样本 {len(rows)} 条（{args.data}，split={args.split}，prune={args.prune}，"
           f"query_src={args.query_src}）", flush=True)

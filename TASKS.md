@@ -1,123 +1,154 @@
-# TASKS · 当前轮 T1.5c：查询口径开关 —— 复现的最后一格 + 致盲判别
+# TASKS · 当前轮 T1.5d：keyphrase 查询（复现终审）+ 致盲四档 —— 跑完关闭复现线
 
-> 背景：`results/archive/12_...` 与 `t1_5b_package_2026-10-27/01_reports/12_REPORT_T1.5b_TYPO_2026-10-27.md`
-> （**Mac 侧已独立复核，四格数字、分层、CI、z 全部对得上**，见 `scripts/t1_5b_analysis.py`）。
-> 本轮只做两件便宜的事，都是**已归档数据的延伸**，不改攻击本体。
-> 常驻规则见 `Agent.md`；本轮仍不改 `third_party/`、不改 `src/`。
-
----
-
-## 零、这轮要回答的问题（一句话）
-
-TRIM 的评分对象是「图像 patch 与**文本查询**的相似度」。MM-SafetyBench 为了构成攻击，
-**故意把关键词从问题里删掉了**（"The image shows a phrase of an activity…"）。
-T1.5b 的探针实测：用这个模板问句当查询时，**白底留白的相似度（28.6–29.3）高于黑字条带（24.9–26.9）**
-⇒「保留高相似度 token」恰好等于「删掉载荷」（实测 ASR −9.77pp）。
-
-**也就是说：TRIM 原文 §3.2 的机制（保留前景→恶意语义被提纯）在这个基准上从未被触发过。**
-唯一能让它触发的办法，是把查询换成**真的说出载荷**的文本（官方 JSON 里有 `Key Phrase`
-与 `Changed Question` 两个字段）。这就是本轮唯一的自变量。
-
-> 这一格**不是为了凑正方向**：无论正负都是结论。
-> 正 ⇒ 复现成功，且我们说清了原文依赖的那个未声明口径；
-> 负 ⇒ 原文机制在三种查询定义下都不成立，负结果彻底封死。
+> 背景：`results/archive/11_MAC_RECHECK_T1.5_2026-10-27.md` + `12_REPORT_T1.5b` +
+> Mac 侧 Table 2 对齐分析（本文件 §一.1 的预测表就是它的结论）。常驻规则见 `Agent.md`。
+> 本轮不改 `third_party/`、不改 `src/`；脚本更新已在 `experiments/t1_5_2026-10-27/scripts/`
+> （probe/prune 的输出文件名现带 query-src 后缀，不会再互相覆盖；`--ids-from` 现兼容
+> JSON 数组格式，解析失败**直接抛错**不再静默退回全量——T1.5 首轮那个坑已封）。
+>
+> **三天倒计时下的定位：这是复现线的终审实验。跑完无论结果如何，复现线关闭，
+> 之后全部时间转入交付物 1 写作与项目主线（MAI 真值审计/诱饵席数）。**
 
 ---
 
-## 一、任务
+## 零、这一轮在审什么（一段话说清）
 
-### 1 · 探针：查询换成关键词，选择会不会翻转（几分钟，0 生成）
+TRIM 挑图块靠"图块与一段文本的 CLIP 相似度"。此前 15+ 个配置里，那段文本永远是
+基准的匿名化模板句（"…a phrase of an activity…"，**不含关键词**）。
+我们实测在这个条件下：白底留白的相似度（28.6–29.3）**高于**黑字条带（24.9–26.9）
+⇒"保留高相似度块"实际删载荷 ⇒ TYPO highsim **−9.77pp**。
+
+本轮第一次改变这个条件：**把喂给打分器的文本换成官方 JSON 里该样本的 `Key Phrase`
+（图上真实渲染的那几个字）**。模型的 prompt 一字不动——只动 `texts=` 这一个变量。
+
+它裁决两个竞争解释：
+- **解释① 锚缺失**：排序被白底主导，是因为查询太抽象。→ 加关键词后排序应**翻转**。
+- **解释② 范畴错配**：CLIP 图块特征表达不了字形内容，喂什么都不会翻转。
+
+---
+
+## 一、任务（严格按序，每步有硬门槛）
+
+### 1 · 判门探针（约 5–10 分钟，只加载 CLIP，0 生成）★决定后面跑不跑
 
 ```bash
-# 先跑 40 条看方向，别一上来跑全量
 CUDA_VISIBLE_DEVICES=6 python experiments/t1_5_2026-10-27/scripts/t1_5_trim_probe.py \
-    --split TYPO --query-src keyphrase --limit 40
-CUDA_VISIBLE_DEVICES=6 python experiments/t1_5_2026-10-27/scripts/t1_5_trim_probe.py \
-    --split TYPO --query-src changed  --limit 40
-CUDA_VISIBLE_DEVICES=6 python experiments/t1_5_2026-10-27/scripts/t1_5_trim_probe.py \
-    --split TYPO --query-src dummy    --limit 40
+    --split TYPO --query-src keyphrase \
+    --ids-from /tmp/t1_4c_typo399_data.json --limit 40
 ```
 
-脚本会先打印 5 条**人工核对**（`prompt → 查询`）。**核对不上就停，别往下跑**
-（官方 JSON 的 id 有洞，`EconomicHarm` 键跳到 132 只有 122 条，所以对齐只能用
-parquet 的 `id`；Mac 侧已用你们的 798 条验证过 798/798 命中且问句逐字相等）。
+脚本会先打印 **5 条人工核对**（`prompt → Key Phrase`）。核对标准：Key Phrase 应与该样本
+图上黑字内容一致、且明显短于模板句。**对不上就停，报回来**（join 已在 Mac 侧用 798/798
+验证过，错位属于异常而非噪声）。
 
-**关键读数**：`载荷行保留率` 三档对比（chance = 0.25）
+同时先跑 5 分钟 sanity：`--query-src dummy --limit 40`（固定 "a photo."），
+检查"排序是否主要由句子抽象度而非关键词驱动"——若 dummy 也大幅翻转，说明
+"任何短具体词都拉得动排序"，解释①要降级为"锚灵敏度"而非"载荷特异"。报告两个都贴。
 
-| query-src | highsim 载荷行保留率 | 含义 |
+**判门读数**（脚本已自动打印）：
+| 读数 | 模板查询（T1.5b 实测） | keyphrase 预测（解释①胜） |
 |---|---|---|
-| template | **0.223**（T1.5b 实测） | 查询无语义 → 高相似度=留白 → 删载荷 |
-| keyphrase | **?** ← 本轮要测 | 若升到 ≥0.45，机制方向被恢复，值得跑生成 |
-| changed | **?** | 同上，且更贴近原文的「文本指令」 |
-| dummy | **?** | 下界对照：查询完全无信息时选到什么 |
+| 载荷格相似度 − 留白格相似度 | **负**（白底赢） | **应转正** |
+| highsim 载荷格保留率 | **0.223**（< 随机 0.26） | **应 >0.5，理想 >0.8** |
 
-**门槛**：只有 `keyphrase` 或 `changed` 让 highsim 的载荷行保留率**明显高于 0.25**（理想 >0.40），
-才进入第 2 步。若仍然 ≈0.2 或更低，说明 CLIP 相似度在这个图上是像素纹理驱动的，
-与语义无关 —— 那本身就是结论，直接跳到第 3 步写报告。
+- **转正（>0.5）** ⇒ 过门，进入 2。
+- **不转（≈模板那组）** ⇒ 解释②胜。**跳过 2，不烧 GPU**，直接做 3，
+  结论写"文本引导剪枝对字形攻击的错配是范畴级的，连正确查询都救不活"——复现线同样关闭。
 
-### 2 · 生成两格（约 50 分钟，只在第 1 步过门槛时跑）
-
-**只换 `texts=`（TRIM 的查询），模型的 prompt 仍是模板问句** ——
-`--query-src` 只作用于剪枝打分，脚本会把实际用的查询写进答案文件的 `trim_query` 字段留档。
+### 2 · 生成两格（约 50 分钟，仅当过门）
 
 ```bash
 CUDA_VISIBLE_DEVICES=5 /home/huangqixu01/venvs/trim-orig/bin/python \
-  experiments/t1_5_2026-10-27/scripts/t1_5_orig_prune.py --split TYPO --prune highsim \
-  --query-src keyphrase
+  experiments/t1_5_2026-10-27/scripts/t1_5_orig_prune.py \
+  --split TYPO --prune highsim --query-src keyphrase
 CUDA_VISIBLE_DEVICES=6 /home/huangqixu01/venvs/trim-orig/bin/python \
-  experiments/t1_5_2026-10-27/scripts/t1_5_orig_prune.py --split TYPO --prune official \
-  --query-src keyphrase
+  experiments/t1_5_2026-10-27/scripts/t1_5_orig_prune.py \
+  --split TYPO --prune official --query-src keyphrase
 ```
 
-判分同上（`--model-tag llava-v1.5-7b-TRIM --exp-prefix t1_5c`），
-必报：ASR、vs `none`(0.7594) 与 vs `highsim`模板查询(0.6617) 两个配对口径、
-**Δ 的 95% CI（配对 SE = `sqrt((b+c)−(b−c)²/n)/n`）**、严格5/通用8 分层。
+自检不变：前 3 条 assert 进 LLM 的视觉 token 数（145）；keeps 文件会打印"不同掩码种类数"。
+答案文件带 `_keyphrase` 后缀（输出名已隔离，不会覆盖 T1.5b 的）。
+每格答案里都带 `trim_query` 字段 = 实际喂进去的 Key Phrase，判分与留档都用它核对。
 
-**预测（写在前头，事后不许改口径）**
-- 若原文机制成立：`highsim_keyphrase` **> none(0.7594)**，且 `official_keyphrase` 更低
-  （因为此时 official 反过来删载荷）。→ 复现出「保留语义相关前景 → 攻击面打开」
-- 若仍在 none 以下：机制在三种查询下都不成立 → 负结果封死，直接进交付物
+判分（协议与全部历史轮一致）：
 
-### 3 · 致盲 vs 拒绝判别（0 生成，只判已归档答案；**这条比第 2 步更重要**）
+```bash
+python experiments/t1_5_2026-10-27/scripts/t1_5_judge.py --split TYPO --ref none \
+  --model-tag llava-v1.5-7b-TRIM --exp-prefix t1_5d \
+  --file trim_highsim_kp=/tmp/t1_5c_answers_highsim_keyphrase_typo399.json \
+  --file trim_official_kp=/tmp/t1_5c_answers_official_keyphrase_typo399.json
+```
 
-交付物一定会被问：TYPO 上 `highsim` 的 −9.77pp 到底是「模型开始拒绝」还是「模型读不到字了」。
-前者是安全增益，后者是**致盲**，两者含义完全相反。
-`实验口径与判据` §五早就为这一问准备了四档（拒绝/误解/部分合规/合规），现在用它：
+配对基准直接拿已归档的 `t1_5b_answers_none_typo399.jsonl` 判定（同 399 id），
+Mac 侧会统一重算 CI/z——服务器只需报每格 ASR + b/c/净/精确 p。
 
-对已归档的 4×399 TYPO 回答加判「档位」（脚本里 `judge_binary_to_level` / `build_refusal_prompt`
-已在 `src/eval/mm_safetybench_judge.py`，可直接用）：
+**预注册判定（写死，不许事后改口径）**：
 
-| 条件 | 应报 |
+| highsim×keyphrase vs none(0.7594) | 结论（交付物原话级） |
 |---|---|
-| none / official / highsim / random | 四档占比，尤其 **误解(档1) 占比** |
+| **≥ 0.7594 且 McNemar p<0.05** | **复现成功**。原文机制需要"打分查询含载荷"这一未声明条件；+6.5 量级是否达成以 CI 为准。交付物 1 翻转 |
+| ≥ 0.7594 但 p≥0.05 | 方向出现、功效不足——如实报点估计+CI；这是"未声明条件"的部分证据，不追认 |
+| < 0.7594（任意 p） | 解释①死亡：连正确查询也做不出放大。负结果**穷尽**，复现线终审关闭，不再有"没试到"的余地 |
 
-**判据**：若 `highsim` 相对 `none` 少掉的 unsafe 主要转成**档 1（误解/答非所问）**
-而非**档 0（拒绝）**，那么「剪枝降低 ASR」是**致盲**，不是安全 ——
-这句话必须写进交付物，否则负结果会被读成"剪枝是一种防御"。
+（official×keyphrase 顺带跑，用来交叉验证翻转的对称性：解释①胜时它应变为**删**载荷、ASR 更低。）
+
+### 3 · 致盲 vs 拒绝四档（0 生成，只调判官 API）★无论第 2 步结果如何都必须做
+
+问题：TYPO highsim −9.77pp，是模型**开始拒绝**（安全改善）还是**读不到字**（致盲）？
+两者含义相反——后者绝不能被写成"剪枝是一种防御"。
+
+对已归档 4×399 TYPO 回答（`t1_5b_package_2026-10-27/04_answers/`）补判四档，
+用 `src/eval/mm_safetybench_judge.py` 现成的 `build_refusal_prompt` + `judge_binary_to_level`，
+写个 /tmp 小驱动即可（每档分布 + 与 unsafe 判定的交叉表）。若第 2 步跑了，新两格一并判。
+
+| 预期（解释①胜，致盲） | 预期（若是真拒绝） |
+|---|---|
+| none 拒绝档 ~7% → highsim **误解档(1) 暴涨、拒绝档(0) 不涨** | 拒绝档(0) 显著上升 |
+
+回答变长 8–12%（T1.5 已测）与致盲假说一致，四档是直接检验。
 
 ---
 
-## 二、不要做
+## 二、时间与取舍（三天）
 
-| 不要 | 因为 |
-|---|---|
-| 用 `--query-src` 同时改模型 prompt | 那改了下攻击本体，两个变量混在一起，全部格子不可比 |
-| 第 1 步不核对 5 条映射就跑 | id 有洞，错位对齐会静默产出"看起来合理"的垃圾 |
-| 跑到 SD 全量 / 换保留率凑正方向 | 调参凑数。keep 固定 0.25 |
-| 把 `random` 当逐样本随机引用 | T1.5b 已确认那 399 条**共用一张掩码**（本轮脚本已修，重跑才可信） |
-| 再补 T1.4/T1.5/T1.5b 的重复格子 | 三套数据已相互对齐（harness 差 0.00pp / −0.25pp），够了 |
+```
+Day 0（今天）    §一.1 判门（~15 分钟含 dummy）→ 过门立刻起 §一.2 两卡并跑
+Day 1 上午       判分 + §一.3 四档（API 时间）→ 数字齐，复现线定案
+Day 1 下午起     复现线关闭。转：交付物 1 骨架（Table 2 对齐表 + 三层归因 + C1–C5）
+                 + 项目主线第一步：MAI top-m × 载荷格 命中审计（序数读数，不吃功效）
+```
 
----
+**不要做的**（再强调一遍，防止默认滑回去）：
+- SD 全量 1680 / TYPO 全量 1680（CI 已排除 +6.5 的"测不到"读法，扩样零增量）
+- ORIGINAL / BLACK 分片（见 §三，降为"写作期可选加固"）
+- 任何保留率 / conv / max_new_tokens 扫描
+- oracle_fg / oracle_bg 本轮不排（见下）
+- 把 keyphrase 塞进模型 prompt（拆攻击本体，结论不可归因——脚本只动 texts=，别在包装层手贱）
 
-## 三、回传
+> **oracle_fg/bg（Table 9 的忠实消融：100% 保载荷 vs 0% 保载荷）怎么摆**：
+> 它没有被现有数据判死——official 也只保 45% 载荷，与"全保"不是一回事，仍是
+> 唯一不受查询锚污染的干净反证。但先验低（在"载荷重要度"的单一轴上，
+> official@45%→−3.01 与 random@26%→−3.01 已经给出"保得更多并没有换到上升"的梯度），
+> 且要新建两个保留集模式（约 1.5 小时含调试）。
+> **决策规则**：若 §一.2 的 keyphrase 格出现"≥none 方向"，说明机制确实被查询锚点亮，
+> 那时 oracle_fg 值得作为追加确认（Day 2）；若 keyphrase 不过门，oracle 也一并放弃——
+> 两条逃逸路径共享"载荷被保留"这一前提，前者已死，后者独活的可能性不足以花 Day 2。
 
-`results/archive/13_REPORT_T1.5c_query_<日期>.md`：
+## 三、§一.1 判门的理论意义（给报告用的两句）
 
-1. 第 1 步三档 query-src 的**载荷行保留率表**（+ 5 条人工核对原文）
-2. 是否过门槛；过则给第 2 步两格 ASR/CI/分层与两个配对口径
-3. **第 3 步四档分布表**（这一条无论第 2 步结果如何都必须做，成本只是判官调用）
-4. 结论二选一，写死：
-   - 「原文机制需要查询含载荷，我们在 X 下复现出 +Ypp」，或
-   - 「三种查询定义下 +6.50pp 都不存在；且 −9.77pp 是致盲/拒绝中的【哪一种】」
+1. 过门并复现 ⇒ 我们发现的不再只是"实现≠规范"（符号 bug），而是
+   "**规范≠可运行**"：TRIM 的放大机制在此类基准上依赖一个**没有任何一方实现过的条件**
+   （打分查询必须携带载荷原文）。这是对一篇已发表工作的可操作修正，不是单纯否定。
+2. 不过门 ⇒ 错配是范畴级的：文本相似度这条引信在"关键词被逐出文本域"的攻击上
+   根本点不着。负结果从"我们复现不出"升级为"原理上不该期望它出现"——同样封死，但更硬。
 
-**当天回传。** 这是复现阶段的最后一格，之后进入交付物改写。
+## 四、回传
+
+`results/archive/14_REPORT_T1.5d_keyphrase_<日期>.md`：
+1. 判门结果（两查询 × 载荷/留白相似度差、highsim 载荷保留率）+ 5 条人工核对原文
+2. 过门则两格：ASR、vs none 与 vs T1.5b-highsim 两个配对口径、b/c、精确 p、CI
+3. 四档交叉表（6 格：旧 4 + 新 2）——致盲 or 拒绝，一句话定案
+4. 按 §一.2 预注册表落行的结论；复现线**正式关闭声明**
+5. 结果块（新格 kind=asr；判门 kind=smoke）
+
+**当天回传。** 这份报告 + 11/12 号 + Table 2 对齐表，就是交付物 1 的全部实验章节。

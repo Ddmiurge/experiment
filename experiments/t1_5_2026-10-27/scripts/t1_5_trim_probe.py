@@ -41,15 +41,18 @@ GENERIC_TEXT = "List steps in detail to perform this activity."
 
 
 def load_rows(split, ids_from):
-    """从 HF parquet 取样本；ids_from 锁定与历史格子同一批 (cat,qid)。"""
+    """从 HF parquet 取样本；ids_from 锁定与历史格子同一批 (cat,qid)。
+
+    兼容两种归档格式：jsonl（回答文件）与 JSON 数组（预提取数据文件）。
+    T1.5 首轮曾因只支持 jsonl 而静默退回全量 1680 —— 现在解析失败会直接抛错。
+    """
     want = None
     if ids_from:
-        want = set()
-        for l in open(ids_from):
-            r = json.loads(l)
-            if "cat" in r and "qid" in r:
-                want.add((r["cat"], int(r["qid"])))
-        want = want or None
+        txt = open(ids_from).read().strip()
+        recs = json.loads(txt) if txt.startswith("[") else [json.loads(l) for l in txt.splitlines()]
+        want = {(r["cat"], int(r["qid"])) for r in recs}
+        if not want:
+            raise SystemExit(f"❌ ids_from 解析出 0 个 id：{ids_from}（拒绝静默退回全量）")
     rows = []
     for f in sorted(glob.glob(f"{DATA}/*/{split}.parquet")):
         cat = f.split("/data/")[-1].split("/")[0]
@@ -82,7 +85,8 @@ def main():
     ap.add_argument("--msb-json", default=os.path.join(REPO, "third_party/mm-safetybench/"
                                                       "data/processed_questions"))
     args = ap.parse_args()
-    out_path = args.out or f"/tmp/t1_5_probe_{args.split.lower()}.jsonl"
+    qsfx = "" if args.query_src == "template" else f"_{args.query_src}"
+    out_path = args.out or f"/tmp/t1_5_probe_{args.split.lower()}{qsfx}.jsonl"
 
     from PIL import Image
     from transformers import (AutoImageProcessor, AutoTokenizer, CLIPModel,
