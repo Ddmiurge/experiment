@@ -20,18 +20,17 @@ ASR 会不会升过不剪枝基线**（Table 9 的 oracle 操作）。
 
 ## 一、步骤（严格按序；每步有停线条件）
 
-### 0 · 掩码审计预跑（CPU，几分钟）——**修订#2 后口径**
+### 0 · 掩码审计预跑（CPU，几分钟）——**修订#3 终版：纯秩构造，无任何待决参数**
 
 ```bash
 /home/huangqixu01/venvs/trim-orig/bin/python \
   experiments/t1_6_2026-10-29/scripts/oracle_masks.py --data /tmp/t1_4c_typo399_data.json
 ```
 
-掩码不再从探针归档搬运：`oracle_geom.build_keep` 在**模型实际消费的 px 几何**里按 cell 级
-活动度现算（ink=MAD 阈值；<144 补足、>144 裁行，两支都会真实触发——step2 已证
-"恒 6 行/恰 144"是探针几何的巧合）。审计打印：|ink| 分布、pad/trim 计数、fallback 计数。
-**fallback>0 或 |ink| 分布离谱（如恒 0 / 恒 576）→ 停报**。原 payload_rows 归档口径
-（T1.5b §3.1 的 45.07%/22.28%）降为探针几何附录读数，不进 T1.6 主表。
+④=活动度降序前 144 格、③=升序前 144 格（互斥由构造保证；Otsu 墨迹只当诊断）。
+审计打印 |ink| 分布、cov4 中位、leak3 计数。**停线只有一条**：
+`leak3>0`（任一样本）或 `median(cov4)<0.9` ⇒ ④已不是"保载荷"，停报勿进冒烟；
+否则 PASS 直接往下。历史行口径（含 T1.5b §3.1 的 45.07/22.28）一律附录化，不进主表。
 
 ### 1 · 读出率口径定标（CPU，1 分钟，**先于一切生成**）
 
@@ -60,11 +59,9 @@ CUDA_VISIBLE_DEVICES=6 /home/huangqixu01/venvs/trim-orig/bin/python \
   --out /tmp/t1_6_smoke_b.json
 ```
 
-冒烟只剩两种该拦的死法：`assert 145` 不过；或**运行时掩码 ≠ step0 审计件**
-（⇒ 两脚本 preprocess 漂移，停报——同函数同路径下它不该响，响了就是真问题）。
-旧"px 复算 vs 归档行"的跨几何比对随修订#2 废除。
-冒烟打印应见 `ink_n=… pad…/trim…` 与审计件同值；③ 零墨迹是构造保证，keeps 里
-ink_n/note 留档可反解核验（§5 保留率核验改用 ink 覆盖率 = min(144,|ink|)/|ink|）。
+冒烟自检全部是"不该响"的构造级断言：④∩③=∅、len(keep)=144、assert 145、
+运行时掩码逐条 == step0 审计件。响了即停（=preprocess 漂移或代码 bug），不存在需要
+现场裁量的检查。keeps 每行带 cov4/leak3 审计量，§5 保留率核验直接反解。
 
 ### 3 · 全量生成（两卡并行，约 3h/格；协议 §7 估 1–2 天含判分）
 

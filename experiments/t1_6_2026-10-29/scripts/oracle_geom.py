@@ -1,89 +1,80 @@
 #!/usr/bin/env python3
-"""T1.6 冻结修订#2 · oracle 载荷集的**模型几何 cell 级**构造（决策记录见协议文末）
+"""T1.6 · oracle 保留集构造（修订#3 · 终版：**无阈值、无随机、模型几何内**）
 
-为什么不是 A（行级重算）也不是沿用探针归档行（=C 的前身）：
-  · 探针归档 payload_rows 活在裸 CLIP 路径的几何里（条带满高 24 行、字形在 11–16），
-    原版栈把条带压到 ~4.2 行、贴顶（实测 IoU 0.028、92.6% 取到空白）——
-    跨几何搬运行号必错，服务器 step2 冒烟 3/3 拦住，正确。
-  · 行粒度在原版栈几何里语义崩坏：条带 5/7/9/11 行高矮不一，top-6 行
-    在矮样本混入带外白行、在高样本只装得下 6/11 行 ⇒ 载荷份额逐样本漂 45–55%，
-    且"6×24=144 恰好等于预算"在模型几何不成立（399/399 触发溢出或补足）。
-  · cell 级把这些问题全消掉：预算天然=144，选择直接按"每格笔画活动度"，
-    语义 = 保留最像字形墨迹的 144 格 = "载荷在场"的最细可用口径。
+为什么又改一次（诚实记录）：修订#2 的 ink=MAD 阈值在真实 TYPO 图上必然退化——
+白底占 ~80% 格、活动度≈0（归一化后常数块），零膨胀分布下 median+6·MAD≈0，
+ink 集合爆量→落 fallback→"上限怎么办"变成一个待决问题。**干预的定义里不该有任何
+待决旋钮**，故终版改为纯秩定义：
 
-冻结口径（生成时就地算，杜绝一切几何漂移；审计件由 oracle_masks.py 用**同一函数**产出）：
-  1) act(s,i)   = 模型消费的 px（原版栈 process_images 后的 [1,3,336,336]）第 i 个
-                  14×14×3 cell 跨通道的 std                          —— 与探针 cell 同法
-  2) ink(s)     = {i: act_i > median + 6·MAD}；退化时( |ink|<8 或 >200 )取 act 前 12%
-                  （与探针 cell 级 MAD 检测同参数，Mac 合成图 precision/recall=1.00）
-  3) ④ O-载荷   = |ink|≥144: ink 内按 act 降序取 144（stable）;
-                  |ink|<144: 全部 ink + 非 ink 中均匀随机补足到 144（default_rng(42)）
-     ③ O-留白   = 非 ink 中均匀随机 144（同 rng）⇒ ③ 含 ink 恒 0（构造保证，留核验）
-  4) 进 LLM：keep(144，格序升序=原空间序) + 被丢 432 均值聚合 token = 145 —— 与全部历史条件同形
+    ④ O-载荷 = 576 格按模型 px 的逐格活动度降序取前 144（并列按格序，稳定排序）
+    ③ O-留白 = 同秩升序取后 144 —— 与④严格互斥、纯白优先，是 highsim"留最白"的端点版
+    两格无阈值、无 rng、无 pad/trim 分支；聚合 token 与 145 规则不变。
 
-随机性说明：rng 每样本 default_rng(42) 重建（与既有 random 臂同实现）⇒ 补足/③ 的选取
-在同尺寸样本间可复现；(cat,qid) 顺序固定 ⇒ 全程确定。
+ink/MAD/pad/trim/fallback 全部废除为**干预输入**；墨迹格数只作为审计诊断量
+（Otsu 自动阈值，独立于干预，不进任何 keep 集合）。审计口径：
+    ink_n(④覆盖核验)= |④∩otsu墨迹| / |otsu墨迹|   设计=1（墨迹≤144 时）
+    ③泄漏 = |③∩otsu墨迹|                          设计=0
+停线条件（全部写死在 TASKS step0，不留现场判断）：
+    ③泄漏>0 任意样本 ⇒ 构造 bug；或 中位覆盖率 <0.9 ⇒ "④≉保载荷"前提破了，停报。
 
-本模块被两处 import：t1_6_oracle_prune.py（运行时构建，权威）与 oracle_masks.py
-（预跑审计 + 落盘 masks 供冒烟比对，同一 process_images 路径）。
+本模块是**唯一实现处**：生成器运行时调用，oracle_masks.py 审计件调用同一函数逐条比对。
 """
 import numpy as np
 
 NROW = NCOL = 24
 BUDGET = 144
-SEED = 42
 
 
 def cell_activity(px) -> np.ndarray:
-    """px: 模型实际消费的张量 [1,3,H,W]（336）。返回 [576] 每格活动度。"""
-    x = np.asarray(px[0], dtype=np.float64)                    # [3,H,W]
-    x = x.transpose(1, 2, 0)                                   # [H,W,3]
-    h = x.shape[0] // NROW                                     # 14
-    x = x.reshape(NROW, h, NCOL, h, x.shape[2])
-    x = x.transpose(0, 2, 1, 3, 4).reshape(NROW * NCOL, -1)
-    return x.std(axis=1)
+    """px: 模型实际消费的张量 [1,3,H,W]（336）。返回 [576] 每格跨通道 std。"""
+    x = np.asarray(px[0], dtype=np.float64).transpose(1, 2, 0)     # [H,W,3]
+    h = x.shape[0] // NROW
+    x = x.reshape(NROW, h, NCOL, h, x.shape[2]).transpose(0, 2, 1, 3, 4)
+    return x.reshape(NROW * NCOL, -1).std(axis=1)
 
 
-def ink_mask(act: np.ndarray):
-    """MAD 阈值；返回 (ink_idx sorted, mode)。"""
-    med = np.median(act)
-    mad = np.median(np.abs(act - med))
-    mask = act > med + 6.0 * mad
-    n = int(mask.sum())
-    mode = "mad"
-    if n < 8 or n > 200:
-        k = int(round(0.12 * len(act)))
-        mask = np.zeros(len(act), dtype=bool)
-        mask[np.argsort(-act, kind="stable")[:k]] = True
-        mode = "fallback_top12pct"
-    return np.flatnonzero(mask), mode
+def _order(act):
+    """稳定秩：活动度降序（并列按格序升序）⇒ ④ 取前 BUDGET、③ 取后 BUDGET。"""
+    return np.lexsort((np.arange(len(act)), -act))
 
 
-def build_keep(act: np.ndarray, which: str):
-    """which ∈ {payload, blank}。返回 (keep sorted list, ink_count, note)。"""
-    ink, mode = ink_mask(act)
-    pool = np.setdiff1d(np.arange(len(act)), ink)
-    note = mode
-    if which == "payload":
-        if len(ink) >= BUDGET:
-            order = ink[np.argsort(-act[ink], kind="stable")]
-            keep = order[:BUDGET]
-            note += f";trim{len(ink) - BUDGET}"
-        else:
-            rng = np.random.default_rng(SEED)
-            extra = rng.choice(pool, BUDGET - len(ink), replace=False)
-            keep = np.concatenate([ink, extra])
-            note += f";pad{BUDGET - len(ink)}"
-    elif which == "blank":
-        assert len(pool) >= BUDGET
-        keep = np.random.default_rng(SEED).choice(pool, BUDGET, replace=False)
-    else:
-        raise ValueError(which)
-    return sorted(int(k) for k in keep), int(len(ink)), note
+def build_keeps(act):
+    """返回 (keep_payload, keep_blank, audit dict)。纯秩构造，无任何可调参数。"""
+    order = _order(act)
+    kp = sorted(int(i) for i in order[:BUDGET])
+    kb = sorted(int(i) for i in order[-BUDGET:])
+    t = otsu_threshold(act)
+    ink = np.flatnonzero(act > t)
+    inkset = set(int(i) for i in ink)
+    audit = {
+        "otsu_t": float(t), "ink_n": int(len(ink)),
+        "cov4": (len(inkset & set(kp)) / len(inkset)) if len(ink) else float("nan"),
+        "leak3": int(len(inkset & set(kb))),
+    }
+    return kp, kb, audit
 
 
-def audit_row(keep, ink_count):
-    """keeps 文件里随行落盘的核验量。"""
-    rows = [k // NCOL for k in keep]
-    return {"keep_n": len(keep), "ink_n": ink_count,
-            "kept_rows": sorted(set(rows)), "rows_spread": max(rows) - min(rows) + 1}
+def otsu_threshold(v, bins=64):
+    """Otsu 仅用于审计墨迹计数（不进干预）。零膨胀下退化则返回 +inf（ink_n=0，审计会标）。"""
+    v = np.asarray(v, dtype=np.float64)
+    if v.max() - v.min() < 1e-9:
+        return float("inf")
+    hist, edges = np.histogram(v, bins=bins)
+    p = hist / hist.sum()
+    mid = (edges[:-1] + edges[1:]) / 2
+    w0 = np.cumsum(p); mu0 = np.cumsum(p * mid); mu = (p * mid).sum()
+    w1 = 1 - w0; mu1 = mu - mu0
+    den = (w0 * w1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        sb = (mu0 * w1 - mu1 * w0) ** 2 / den
+    sb[den == 0] = 0.0
+    return float(mid[int(np.argmax(sb))])
+
+
+# ---- 兼容旧接口名（生成器 import build_keep；一次调用返回一格的 keep）----
+def build_keep(act, which):
+    kp, kb, au = build_keeps(act)
+    keep = kp if which == "payload" else kb
+    note = f"rank;ink{au['ink_n']};cov4{au['cov4']:.2f}" if which == "payload" \
+        else f"rank;ink{au['ink_n']};leak3{au['leak3']}"
+    return keep, au["ink_n"], note

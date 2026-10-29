@@ -24,7 +24,7 @@ sys.path.insert(0, HERE)
 REPO = os.environ.get("REPO", "/home/huangqixu01/experiment")
 sys.path.insert(0, os.path.join(REPO, "third_party/trim"))
 
-from oracle_geom import BUDGET, build_keep, cell_activity  # noqa: E402
+from oracle_geom import BUDGET, build_keeps, cell_activity  # noqa: E402
 
 
 def main():
@@ -54,28 +54,27 @@ def main():
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         px = process_images([img], ip, cfg)
         act = cell_activity(px.numpy())
-        kp, n, note_p = build_keep(act, "payload")
-        kb, _, note_b = build_keep(act, "blank")
-        assert len(kp) == len(kb) == BUDGET
-        fp.write(json.dumps({"cat": cat, "qid": qid, "keep": kp, "ink_n": n, "note": note_p},
-                            ensure_ascii=False) + "\n")
-        fb.write(json.dumps({"cat": cat, "qid": qid, "keep": kb, "ink_n": n, "note": note_b},
-                            ensure_ascii=False) + "\n")
-        ink_n.append(n)
-        notes[note_p.split(";")[0]] += 1
+        kp, kb, au = build_keeps(act)
+        assert len(kp) == len(kb) == BUDGET and not (set(kp) & set(kb))
+        fp.write(json.dumps({"cat": cat, "qid": qid, "keep": kp, **au}, ensure_ascii=False) + "\n")
+        fb.write(json.dumps({"cat": cat, "qid": qid, "keep": kb, **au}, ensure_ascii=False) + "\n")
+        ink_n.append((au["ink_n"], au["cov4"], au["leak3"]))
         if sample_show < 3:
-            print(f"样例 {cat}#{qid}: ink_n={n} {note_p} kept_rows(④)="
-                  f"{sorted({k // 24 for k in kp})} 图尺寸={img.size}", flush=True)
+            print(f"样例 {cat}#{qid}: ink_n={au['ink_n']} cov4={au['cov4']:.2f} "
+                  f"leak3={au['leak3']} kept_rows(④)={sorted({k // 24 for k in kp})} "
+                  f"图尺寸={img.size}", flush=True)
             sample_show += 1
     fp.close(); fb.close()
-    ink_a = np.array(ink_n)
-    print(f"\n审计：n={len(ink_n)} · |ink| 分布 min/p50/p95/max = "
-          f"{ink_a.min()}/{int(np.percentile(ink_a,50))}/{int(np.percentile(ink_a,95))}/{ink_a.max()}")
-    print(f"  mode 计数 = {dict(notes)}（fallback 应≈0，若多说明阈值参数需报审）")
-    print(f"  ④ pad 样本 = {sum(1 for x in ink_n if x < BUDGET)} · trim 样本 = "
-          f"{sum(1 for x in ink_n if x > BUDGET)} · 恰好 = {sum(1 for x in ink_n if x == BUDGET)}")
-    print("  （修订#2 预期：180→ink~120 补 24；270→~168 裁 24；360/450→裁更多——"
-          "全部如实入档，不再宣称 no-op）")
+    ink_a = np.array([x[0] for x in ink_n])
+    cov = np.array([x[1] for x in ink_n if x[1] == x[1]])          # 去 nan
+    leak = sum(1 for x in ink_n if x[2] > 0)
+    print(f"\n审计（修订#3 终版口径：纯秩干预，otsu 仅诊断）：n={len(ink_n)}")
+    print(f"  |ink| 分布 min/p50/p95/max = {ink_a.min()}/{int(np.percentile(ink_a,50))}/"
+          f"{int(np.percentile(ink_a,95))}/{ink_a.max()}（>144 的样本 cov4<1，如实登记）")
+    print(f"  ④ 覆盖率 cov4：中位 {np.median(cov):.3f} · <1 的样本 {int((cov<1).sum())} · "
+          f"③ 泄漏样本 = {leak}（设计恒 0）")
+    stop = leak > 0 or np.median(cov) < 0.9
+    print("  停线判定：", "❌ STOP——按 TASKS step0 停报，勿进冒烟" if stop else "PASS → 可进 step2 冒烟")
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ import numpy as np
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from oracle_geom import build_keep, cell_activity   # 冻结口径的唯一实现处
+from oracle_geom import build_keeps, cell_activity  # 冻结口径（修订#3·终版）唯一实现处
 
 REPO = os.environ.get("REPO", "/home/huangqixu01/experiment")
 TRIM_REPO = os.path.join(REPO, "third_party/trim")
@@ -164,8 +164,8 @@ def main():
             dist = {}
             for kk in keep:
                 dist[kk // NCOL] = dist.get(kk // NCOL, 0) + 1
-            print(f"[{i}] {cat}#{qid} ink_n={ink_n} {note} keep行覆盖={len(dist)}行 "
-                  f"keep={len(keep)}", flush=True)
+            print(f"[{i}] {cat}#{qid} ink_n={au['ink_n']} cov4={au['cov4']:.2f} "
+                  f"leak3={au['leak3']} keep行覆盖={len(dist)}行 keep={len(keep)}", flush=True)
 
         conv = conv_templates[args.conv].copy()
         conv.append_message(conv.roles[0], f"<image>\n{q}")
@@ -186,8 +186,8 @@ def main():
                                "prune": args.prune}, ensure_ascii=False) + "\n")
         fout.flush()
         fkeep.write(json.dumps({"cat": cat, "qid": qid, "prune": args.prune,
-                                "keep": sorted(CURRENT_KEEP[0]),
-                                "ink_n": ink_n, "note": note}, ensure_ascii=False) + "\n")
+                                "keep": sorted(CURRENT_KEEP[0]), "audit": au},
+                               ensure_ascii=False) + "\n")
         fkeep.flush()
         if (i + 1) % 20 == 0:
             print(f"[{i+1}/{len(rows)}] mismatch累计 {MISMATCH[0]}", flush=True)
