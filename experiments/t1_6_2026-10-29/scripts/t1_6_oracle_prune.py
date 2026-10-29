@@ -36,6 +36,9 @@ import sys
 import numpy as np
 import torch
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from oracle_geom import build_keep, cell_activity   # 冻结口径的唯一实现处
+
 REPO = os.environ.get("REPO", "/home/huangqixu01/experiment")
 TRIM_REPO = os.path.join(REPO, "third_party/trim")
 MODEL_PATH = os.environ.get("TRIM_M", "/home/huangqixu01/models/llava-v1.5-7b-TRIM")
@@ -45,8 +48,6 @@ NROW = NCOL = 24
 BUDGET = 144
 
 CURRENT_KEEP = [set()]          # 主循环逐样本注入；token_reduction_oracle 读取
-MISMATCH = [0]
-TOTAL = [0]
 
 
 def token_reduction_oracle(self, image_features, all_image_features, text_features=None):
@@ -89,13 +90,8 @@ def apply_patch():
     print("[patch] token_reduction → oracle（保留集=真值掩码，无判据）", flush=True)
 
 
-def activity_rows(px):
-    """与探针同法：逐行像素活动度 std，取最高 6 行。px=[1,3,336,336]（模型实际消费的张量）"""
-    act = [float(px[0, :, r * 14:(r + 1) * 14, :].std()) for r in range(NROW)]
-    return sorted(sorted(range(NROW), key=lambda r: -act[r])[:6])
-
-
-def load_masks(path):
+def load_audit(path):
+    """oracle_masks.py 的审计件：仅用于逐条比对，**不作为生成输入**（权威=运行时同函数现算）。"""
     d = {}
     for l in open(path):
         r = json.loads(l)
@@ -116,7 +112,10 @@ def main():
 
     which = "payload" if args.prune == "oracle_payload" else "blank"
     masks_path = args.masks or f"/tmp/t1_6_masks_{which}.jsonl"
-    masks = load_masks(masks_path)
+    audit = load_audit(masks_path) if os.path.exists(masks_path) else None
+    if audit is None:
+        print(f"⚠ 审计件 {masks_path} 不存在——照跑（掩码本来就运行时算），但 §2 冻结记录缺失",
+              flush=True)
     out = args.out or f"/tmp/t1_6_answers_{args.prune}_typo399.json"
     keep_out = out.replace("_answers_", "_keeps_").replace(".json", ".jsonl")
     apply_patch()
@@ -130,11 +129,10 @@ def main():
 
     rows = [(r["cat"], int(r["qid"]), r["question"], base64.b64decode(r["image_b64"]))
             for r in json.load(open(args.data))]
-    missing = [k for r in rows for k in [(r[0], r[1])] if k not in masks]
-    assert not missing, f"掩码缺 id（先跑 oracle_masks.py）：{missing[:3]}…共 {len(missing)}"
     if args.limit:
         rows = rows[:args.limit]
-    print(f"样本 {len(rows)} 条 · 掩码 {len(masks)} 条（{masks_path}）", flush=True)
+    print(f"样本 {len(rows)} 条 · 审计件 {0 if audit is None else len(audit)} 条 · 掩码=运行时现算"
+          f"（oracle_geom 同一函数）", flush=True)
 
     cfg = AutoConfig.from_pretrained(MODEL_PATH)
     cfg.mm_vision_tower = CLIP_PATH
@@ -153,24 +151,21 @@ def main():
     for i, (cat, qid, q, img_bytes) in enumerate(rows):
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         img_tensor = process_images([img], image_processor, model.config)
-        mrec = masks[(cat, qid)]
-        CURRENT_KEEP[0] = set(mrec["keep"])
 
-        # 自检 2：模型 px 复算载荷行 vs 掩码口径
-        mine = activity_rows(img_tensor)
-        TOTAL[0] += 1
-        same = mine == sorted(mrec["payload_rows"])
-        MISMATCH[0] += 0 if same else 1
+        # 自检 2（修订#2）：掩码=模型实际消费的 px 现算（oracle_geom 冻结口径）；
+        # 审计件存在则逐条硬比对，不等即停（说明两脚本 preprocess 漂移了）
+        act = cell_activity(img_tensor.numpy())
+        keep, ink_n, note = build_keep(act, which)
+        CURRENT_KEEP[0] = set(keep)
+        if audit is not None and (cat, qid) in audit:
+            assert keep == audit[(cat, qid)]["keep"], \
+                f"运行时掩码≠审计件 @{cat}#{qid}：preprocess 路径漂移，停并报回"
         if i < 3 or (i + 1) % 50 == 0:
             dist = {}
-            for kk in CURRENT_KEEP[0]:
+            for kk in keep:
                 dist[kk // NCOL] = dist.get(kk // NCOL, 0) + 1
-            print(f"[{i}] {cat}#{qid} keep行={sorted(dist)} mask_rows={mrec['payload_rows']} "
-                  f"px复算={'一致' if same else '≠' + str(mine)} keep={len(CURRENT_KEEP[0])} "
-                  f"累计mismatch={MISMATCH[0]}/{TOTAL[0]}", flush=True)
-        if not same and i >= 20 and MISMATCH[0] / TOTAL[0] > 0.05:
-            raise SystemExit(f"❌ 掩码与模型网格错位（不一致率 {MISMATCH[0]/TOTAL[0]:.1%} >5%）——"
-                             "探针 px 路径与原版栈 px 路径不一致，停下来报回，不要继续生成")
+            print(f"[{i}] {cat}#{qid} ink_n={ink_n} {note} keep行覆盖={len(dist)}行 "
+                  f"keep={len(keep)}", flush=True)
 
         conv = conv_templates[args.conv].copy()
         conv.append_message(conv.roles[0], f"<image>\n{q}")
@@ -192,14 +187,12 @@ def main():
         fout.flush()
         fkeep.write(json.dumps({"cat": cat, "qid": qid, "prune": args.prune,
                                 "keep": sorted(CURRENT_KEEP[0]),
-                                "payload_rows": mrec["payload_rows"],
-                                "px_rows_match": same}, ensure_ascii=False) + "\n")
+                                "ink_n": ink_n, "note": note}, ensure_ascii=False) + "\n")
         fkeep.flush()
         if (i + 1) % 20 == 0:
             print(f"[{i+1}/{len(rows)}] mismatch累计 {MISMATCH[0]}", flush=True)
     fout.close(); fkeep.close()
-    print(f"完成 -> {out} / {keep_out} · 网格不一致 {MISMATCH[0]}/{TOTAL[0]}"
-          f"（{MISMATCH[0]/max(1,TOTAL[0]):.2%}）", flush=True)
+    print(f"完成 -> {out} / {keep_out}", flush=True)
 
 
 if __name__ == "__main__":

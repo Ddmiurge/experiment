@@ -20,17 +20,18 @@ ASR 会不会升过不剪枝基线**（Table 9 的 oracle 操作）。
 
 ## 一、步骤（严格按序；每步有停线条件）
 
-### 0 · 掩码重建 + 口径核验（CPU，约 2 分钟）
+### 0 · 掩码审计预跑（CPU，几分钟）——**修订#2 后口径**
 
 ```bash
-python experiments/t1_6_2026-10-29/scripts/oracle_masks.py \
-    --probe t1_5b_package_2026-10-27/06_probe/t1_5_probe_typo.jsonl --show 3
+/home/huangqixu01/venvs/trim-orig/bin/python \
+  experiments/t1_6_2026-10-29/scripts/oracle_masks.py --data /tmp/t1_4c_typo399_data.json
 ```
 
-核对打印件与 Mac 预跑一致：
-`载荷行数/样本 = {6: 399}`；`溢出=0 补足=0`；`③ 载荷行命中=0`。
-**注意**：协议 §2.1 写"211 种取值、范围 5–7"，Mac 实测是 **33 种行集合、恒 6 行**——
-以实测为准进审计件，报告 §6 该句在交付物中改正；**不要**为此改任何代码。
+掩码不再从探针归档搬运：`oracle_geom.build_keep` 在**模型实际消费的 px 几何**里按 cell 级
+活动度现算（ink=MAD 阈值；<144 补足、>144 裁行，两支都会真实触发——step2 已证
+"恒 6 行/恰 144"是探针几何的巧合）。审计打印：|ink| 分布、pad/trim 计数、fallback 计数。
+**fallback>0 或 |ink| 分布离谱（如恒 0 / 恒 576）→ 停报**。原 payload_rows 归档口径
+（T1.5b §3.1 的 45.07%/22.28%）降为探针几何附录读数，不进 T1.6 主表。
 
 ### 1 · 读出率口径定标（CPU，1 分钟，**先于一切生成**）
 
@@ -59,9 +60,11 @@ CUDA_VISIBLE_DEVICES=6 /home/huangqixu01/venvs/trim-orig/bin/python \
   --out /tmp/t1_6_smoke_b.json
 ```
 
-必须看到：每条 `keep=144`、`assert 145` 通过、行分布图 ④=6 行整、③=散点且载荷行 0；
-**px 复算 vs 掩码口径**若报"网格不一致>5%"→ 停，原样贴回来（这意味着探针 px 路径与
-原版栈 px 路径不一致，要先对齐再谈生成）。
+冒烟只剩两种该拦的死法：`assert 145` 不过；或**运行时掩码 ≠ step0 审计件**
+（⇒ 两脚本 preprocess 漂移，停报——同函数同路径下它不该响，响了就是真问题）。
+旧"px 复算 vs 归档行"的跨几何比对随修订#2 废除。
+冒烟打印应见 `ink_n=… pad…/trim…` 与审计件同值；③ 零墨迹是构造保证，keeps 里
+ink_n/note 留档可反解核验（§5 保留率核验改用 ink 覆盖率 = min(144,|ink|)/|ink|）。
 
 ### 3 · 全量生成（两卡并行，约 3h/格；协议 §7 估 1–2 天含判分）
 
