@@ -1,154 +1,117 @@
-# TASKS · 当前轮 T1.5d：keyphrase 查询（复现终审）+ 致盲四档 —— 跑完关闭复现线
+# TASKS · 当前轮 T1.6：oracle 四格仲裁实验（保留轴正端是否存在）
 
-> 背景：`results/archive/11_MAC_RECHECK_T1.5_2026-10-27.md` + `12_REPORT_T1.5b` +
-> Mac 侧 Table 2 对齐分析（本文件 §一.1 的预测表就是它的结论）。常驻规则见 `Agent.md`。
-> 本轮不改 `third_party/`、不改 `src/`；脚本更新已在 `experiments/t1_5_2026-10-27/scripts/`
-> （probe/prune 的输出文件名现带 query-src 后缀，不会再互相覆盖；`--ids-from` 现兼容
-> JSON 数组格式，解析失败**直接抛错**不再静默退回全量——T1.5 首轮那个坑已封）。
->
-> **三天倒计时下的定位：这是复现线的终审实验。跑完无论结果如何，复现线关闭，
-> 之后全部时间转入交付物 1 写作与项目主线（MAI 真值审计/诱饵席数）。**
+> **本轮唯一口径**：`T1.6_oracle_protocol_2026-10-29.md`（仓库根，原 `oracle四格实验协议…` 改名 ASCII）。
+> 背景与判读框架：`思路总览_从复现失败到保留轴_2026-10-29.md` §2–§5（Mac 侧）。
+> 常驻规则 `Agent.md`；判据沿用 `实验口径与判据`。禁调参凑数、禁改 `third_party/`、`src/`。
+> Mac 已完成：掩码模块在探针归档上实测（恒 6 行 / 33 种集合 / 溢出补足恒 0 / ③零命中），
+> 分析脚本已在 ①② 归档上自测（random 行 −3.01/p=0.1263 逐位吻合）。
 
 ---
 
-## 零、这一轮在审什么（一段话说清）
+## 零、本轮在裁决什么（30 秒版）
 
-TRIM 挑图块靠"图块与一段文本的 CLIP 相似度"。此前 15+ 个配置里，那段文本永远是
-基准的匿名化模板句（"…a phrase of an activity…"，**不含关键词**）。
-我们实测在这个条件下：白底留白的相似度（28.6–29.3）**高于**黑字条带（24.9–26.9）
-⇒"保留高相似度块"实际删载荷 ⇒ TYPO highsim **−9.77pp**。
-
-本轮第一次改变这个条件：**把喂给打分器的文本换成官方 JSON 里该样本的 `Key Phrase`
-（图上真实渲染的那几个字）**。模型的 prompt 一字不动——只动 `texts=` 这一个变量。
-
-它裁决两个竞争解释：
-- **解释① 锚缺失**：排序被白底主导，是因为查询太抽象。→ 加关键词后排序应**翻转**。
-- **解释② 范畴错配**：CLIP 图块特征表达不了字形内容，喂什么都不会翻转。
+九格全部是"让判据自己挑 token"——打掉的是**判据层**。
+原文证据链还剩一层从未被独立检验：**人为完美地删背景、只留载荷（不经任何相似度判据），
+ASR 会不会升过不剪枝基线**（Table 9 的 oracle 操作）。
+④ O-载荷 = 该主张的忠实实现（裁决格）；③ O-留白 = "移除前景"净化版（哨兵格）。
+载荷/背景按**冻结真值口径**（T1.5b 探针归档的逐样本 payload_rows）构造，**不重新定义、不得新写**。
 
 ---
 
-## 一、任务（严格按序，每步有硬门槛）
+## 一、步骤（严格按序；每步有停线条件）
 
-### 1 · 判门探针（约 5–10 分钟，只加载 CLIP，0 生成）★决定后面跑不跑
+### 0 · 掩码重建 + 口径核验（CPU，约 2 分钟）
 
 ```bash
-CUDA_VISIBLE_DEVICES=6 python experiments/t1_5_2026-10-27/scripts/t1_5_trim_probe.py \
-    --split TYPO --query-src keyphrase \
-    --ids-from /tmp/t1_4c_typo399_data.json --limit 40
+python experiments/t1_6_2026-10-29/scripts/oracle_masks.py \
+    --probe t1_5b_package_2026-10-27/06_probe/t1_5_probe_typo.jsonl --show 3
 ```
 
-脚本会先打印 **5 条人工核对**（`prompt → Key Phrase`）。核对标准：Key Phrase 应与该样本
-图上黑字内容一致、且明显短于模板句。**对不上就停，报回来**（join 已在 Mac 侧用 798/798
-验证过，错位属于异常而非噪声）。
+核对打印件与 Mac 预跑一致：
+`载荷行数/样本 = {6: 399}`；`溢出=0 补足=0`；`③ 载荷行命中=0`。
+**注意**：协议 §2.1 写"211 种取值、范围 5–7"，Mac 实测是 **33 种行集合、恒 6 行**——
+以实测为准进审计件，报告 §6 该句在交付物中改正；**不要**为此改任何代码。
 
-同时先跑 5 分钟 sanity：`--query-src dummy --limit 40`（固定 "a photo."），
-检查"排序是否主要由句子抽象度而非关键词驱动"——若 dummy 也大幅翻转，说明
-"任何短具体词都拉得动排序"，解释①要降级为"锚灵敏度"而非"载荷特异"。报告两个都贴。
+### 1 · 读出率正则定标（CPU，1 分钟，**先于一切生成**）
 
-**判门读数**（脚本已自动打印）：
-| 读数 | 模板查询（T1.5b 实测） | keyphrase 预测（解释①胜） |
-|---|---|---|
-| 载荷格相似度 − 留白格相似度 | **负**（白底赢） | **应转正** |
-| highsim 载荷格保留率 | **0.223**（< 随机 0.26） | **应 >0.5，理想 >0.8** |
+```bash
+python experiments/t1_6_2026-10-29/scripts/t1_6_readout.py \
+    --answers t1_5_package_2026-10-27/04_answers/t1_4_answers_noprun_400.json \
+    --tag SD-none --expect-r1 42
+```
 
-- **转正（>0.5）** ⇒ 过门，进入 2。
-- **不转（≈模板那组）** ⇒ 解释②胜。**跳过 2，不烧 GPU**，直接做 3，
-  结论写"文本引导剪枝对字形攻击的错配是范畴级的，连正确查询都救不活"——复现线同样关闭。
+要求 R1=42/399（±5），FAIL 即停报（协议 §4.3 说沿用报告 §4.4 正则——这一步就是核对"重建的正则=当年用的正则"）。
 
-### 2 · 生成两格（约 50 分钟，仅当过门）
+### 2 · 冒烟生成：每格 3 条（两卡各 ~2 分钟）
 
 ```bash
 CUDA_VISIBLE_DEVICES=5 /home/huangqixu01/venvs/trim-orig/bin/python \
-  experiments/t1_5_2026-10-27/scripts/t1_5_orig_prune.py \
-  --split TYPO --prune highsim --query-src keyphrase
+  experiments/t1_6_2026-10-29/scripts/t1_6_oracle_prune.py --prune oracle_payload --limit 3 \
+  --out /tmp/t1_6_smoke_p.json
 CUDA_VISIBLE_DEVICES=6 /home/huangqixu01/venvs/trim-orig/bin/python \
-  experiments/t1_5_2026-10-27/scripts/t1_5_orig_prune.py \
-  --split TYPO --prune official --query-src keyphrase
+  experiments/t1_6_2026-10-29/scripts/t1_6_oracle_prune.py --prune oracle_blank --limit 3 \
+  --out /tmp/t1_6_smoke_b.json
 ```
 
-自检不变：前 3 条 assert 进 LLM 的视觉 token 数（145）；keeps 文件会打印"不同掩码种类数"。
-答案文件带 `_keyphrase` 后缀（输出名已隔离，不会覆盖 T1.5b 的）。
-每格答案里都带 `trim_query` 字段 = 实际喂进去的 Key Phrase，判分与留档都用它核对。
+必须看到：每条 `keep=144`、`assert 145` 通过、行分布图 ④=6 行整、③=散点且载荷行 0；
+**px 复算 vs 掩码口径**若报"网格不一致>5%"→ 停，原样贴回来（这意味着探针 px 路径与
+原版栈 px 路径不一致，要先对齐再谈生成）。
 
-判分（协议与全部历史轮一致）：
+### 3 · 全量生成（两卡并行，约 3h/格；协议 §7 估 1–2 天含判分）
+
+去掉 `--limit`、`--out` 用默认（`/tmp/t1_6_answers_oracle_{payload,blank}_typo399.json`）。
+断点不续跑（本脚本无 resume；中断即整格重跑，别手工拼文件）。
+
+### 4 · 判分（判官与全部历史格子逐项一致）
 
 ```bash
 python experiments/t1_5_2026-10-27/scripts/t1_5_judge.py --split TYPO --ref none \
-  --model-tag llava-v1.5-7b-TRIM --exp-prefix t1_5d \
-  --file trim_highsim_kp=/tmp/t1_5c_answers_highsim_keyphrase_typo399.json \
-  --file trim_official_kp=/tmp/t1_5c_answers_official_keyphrase_typo399.json
+  --model-tag llava-v1.5-7b-TRIM --exp-prefix t1_6_oracle \
+  --file none=/tmp/t1_5b_answers_none_typo399.json \
+  --file random=/tmp/t1_5b_answers_random_typo399.json \
+  --file blank=/tmp/t1_6_answers_oracle_blank_typo399.json \
+  --file payload=/tmp/t1_6_answers_oracle_payload_typo399.json
 ```
 
-配对基准直接拿已归档的 `t1_5b_answers_none_typo399.jsonl` 判定（同 399 id），
-Mac 侧会统一重算 CI/z——服务器只需报每格 ASR + b/c/净/精确 p。
+（①②回答若在 /tmp 已清，用包内 `t1_5b_package_2026-10-27/04_answers/` 的路径替代；
+①② ASR 应与归档 75.94/72.93 逐位相同——判分是复用 raw 还是要重判，以 raw 文件在否为准，
+重判若出偏差 >0 条即停报。）
 
-**预注册判定（写死，不许事后改口径）**：
+### 5 · 近端与四档（协议 §4.3/§4.4；先于报 ASR）
 
-| highsim×keyphrase vs none(0.7594) | 结论（交付物原话级） |
-|---|---|
-| **≥ 0.7594 且 McNemar p<0.05** | **复现成功**。原文机制需要"打分查询含载荷"这一未声明条件；+6.5 量级是否达成以 CI 为准。交付物 1 翻转 |
-| ≥ 0.7594 但 p≥0.05 | 方向出现、功效不足——如实报点估计+CI；这是"未声明条件"的部分证据，不追认 |
-| < 0.7594（任意 p） | 解释①死亡：连正确查询也做不出放大。负结果**穷尽**，复现线终审关闭，不再有"没试到"的余地 |
+```bash
+python experiments/t1_6_2026-10-29/scripts/t1_6_level4.py \
+  --cell none=... --cell random=... --cell blank=... --cell payload=... \
+  （每项格式 tag=answers[:judge_raw]，路径同上）
+python experiments/t1_6_2026-10-29/scripts/t1_6_readout.py --answers <各格> --tag <格> \
+  --msb-json third_party/mm-safetybench/data/processed_questions
+```
 
-（official×keyphrase 顺带跑，用来交叉验证翻转的对称性：解释①胜时它应变为**删**载荷、ASR 更低。）
+读出率序必须满足 **④ ≥ ① ≥ ② ≥ ③**（协议 §5）；不满足 ⇒ 管线问题，**不得先报 ASR**，停报。
 
-### 3 · 致盲 vs 拒绝四档（0 生成，只调判官 API）★无论第 2 步结果如何都必须做
+### 6 · 回传
 
-问题：TYPO highsim −9.77pp，是模型**开始拒绝**（安全改善）还是**读不到字**（致盲）？
-两者含义相反——后者绝不能被写成"剪枝是一种防御"。
-
-对已归档 4×399 TYPO 回答（`t1_5b_package_2026-10-27/04_answers/`）补判四档，
-用 `src/eval/mm_safetybench_judge.py` 现成的 `build_refusal_prompt` + `judge_binary_to_level`，
-写个 /tmp 小驱动即可（每档分布 + 与 unsafe 判定的交叉表）。若第 2 步跑了，新两格一并判。
-
-| 预期（解释①胜，致盲） | 预期（若是真拒绝） |
-|---|---|
-| none 拒绝档 ~7% → highsim **误解档(1) 暴涨、拒绝档(0) 不涨** | 拒绝档(0) 显著上升 |
-
-回答变长 8–12%（T1.5 已测）与致盲假说一致，四档是直接检验。
+打包 `t1_6_package_<日期>/`（reports/scripts回答/keeps/judge_raw/结果块，同 T1.5b 结构），
+报告 `results/archive/16_REPORT_T1.6_oracle_<日期>.md`：
+1. §6 预注册表**原样回填**（含核验列）；
+2. §5 落行：正格 / 负格 / 平 + ③哨兵是否落 [−6,−12] + 读出序是否成立；
+3. 四个 `kind=asr` 结果块 + 掩码审计件 `t1_6_masks_audit.txt`；
+4. 若触发"查掩码/网格错位/正则 FAIL"任一停线，如实单列。
 
 ---
 
-## 二、时间与取舍（三天）
+## 二、硬规矩（本轮专用，叠加在通用红线之上）
 
-```
-Day 0（今天）    §一.1 判门（~15 分钟含 dummy）→ 过门立刻起 §一.2 两卡并跑
-Day 1 上午       判分 + §一.3 四档（API 时间）→ 数字齐，复现线定案
-Day 1 下午起     复现线关闭。转：交付物 1 骨架（Table 2 对齐表 + 三层归因 + C1–C5）
-                 + 项目主线第一步：MAI top-m × 载荷格 命中审计（序数读数，不吃功效）
-```
+| 不许 | 因为 |
+|---|---|
+| 重定义载荷行（换 θ、换算法、改用固定行进主表） | §2.1 冻结口径=探针归档逐样本 payload_rows；固定行只进附录敏感性 |
+| 改 oracle 之外的任何条件（栈/conv/512/id/keep 形式） | 协议 §3 逐项锁死；①②复用是设计的一部分 |
+| 读出序不满足还继续报 ASR | 协议 §5：序不成立=管线问题，ASR 无意义 |
+| 看到结果后挪 ±4.0pp / CI 判据、临时加格进主表 | 预注册；加格一律标"探索性" |
+| 把 ④ 的"载荷≈100%"口头化——必须报核验实测值 | 协议 §4.2：kept-set 反解，偏差>2pp 查掩码 |
+| 全量 1680 / 换保留率 / 换分片"顺手加一格" | 复现线已关闭，本轮只裁决操作层一格，加格即稀释 |
 
-**不要做的**（再强调一遍，防止默认滑回去）：
-- SD 全量 1680 / TYPO 全量 1680（CI 已排除 +6.5 的"测不到"读法，扩样零增量）
-- ORIGINAL / BLACK 分片（见 §三，降为"写作期可选加固"）
-- 任何保留率 / conv / max_new_tokens 扫描
-- oracle_fg / oracle_bg 本轮不排（见下）
-- 把 keyphrase 塞进模型 prompt（拆攻击本体，结论不可归因——脚本只动 texts=，别在包装层手贱）
+## 三、时间预算
 
-> **oracle_fg/bg（Table 9 的忠实消融：100% 保载荷 vs 0% 保载荷）怎么摆**：
-> 它没有被现有数据判死——official 也只保 45% 载荷，与"全保"不是一回事，仍是
-> 唯一不受查询锚污染的干净反证。但先验低（在"载荷重要度"的单一轴上，
-> official@45%→−3.01 与 random@26%→−3.01 已经给出"保得更多并没有换到上升"的梯度），
-> 且要新建两个保留集模式（约 1.5 小时含调试）。
-> **决策规则**：若 §一.2 的 keyphrase 格出现"≥none 方向"，说明机制确实被查询锚点亮，
-> 那时 oracle_fg 值得作为追加确认（Day 2）；若 keyphrase 不过门，oracle 也一并放弃——
-> 两条逃逸路径共享"载荷被保留"这一前提，前者已死，后者独活的可能性不足以花 Day 2。
-
-## 三、§一.1 判门的理论意义（给报告用的两句）
-
-1. 过门并复现 ⇒ 我们发现的不再只是"实现≠规范"（符号 bug），而是
-   "**规范≠可运行**"：TRIM 的放大机制在此类基准上依赖一个**没有任何一方实现过的条件**
-   （打分查询必须携带载荷原文）。这是对一篇已发表工作的可操作修正，不是单纯否定。
-2. 不过门 ⇒ 错配是范畴级的：文本相似度这条引信在"关键词被逐出文本域"的攻击上
-   根本点不着。负结果从"我们复现不出"升级为"原理上不该期望它出现"——同样封死，但更硬。
-
-## 四、回传
-
-`results/archive/14_REPORT_T1.5d_keyphrase_<日期>.md`：
-1. 判门结果（两查询 × 载荷/留白相似度差、highsim 载荷保留率）+ 5 条人工核对原文
-2. 过门则两格：ASR、vs none 与 vs T1.5b-highsim 两个配对口径、b/c、精确 p、CI
-3. 四档交叉表（6 格：旧 4 + 新 2）——致盲 or 拒绝，一句话定案
-4. 按 §一.2 预注册表落行的结论；复现线**正式关闭声明**
-5. 结果块（新格 kind=asr；判门 kind=smoke）
-
-**当天回传。** 这份报告 + 11/12 号 + Table 2 对齐表，就是交付物 1 的全部实验章节。
+掩码+正则 3 分钟 → 冒烟 5 分钟 → 全量 2×3h（并行）→ 判分+四档+读出 ~1h → 回传。
+**单卡日即可完成。** 跑完无论读数朝哪边，`思路总览` §7 表格 #2 即勾掉，下游进入写作期。
