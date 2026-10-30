@@ -117,7 +117,8 @@ def main():
         print(f"⚠ 审计件 {masks_path} 不存在——照跑（掩码本来就运行时算），但 §2 冻结记录缺失",
               flush=True)
     out = args.out or f"/tmp/t1_6_answers_{args.prune}_typo399.json"
-    keep_out = out.replace("_answers_", "_keeps_").replace(".json", ".jsonl")
+    keep_out = (os.path.splitext(out)[0] if "_keeps_" in out else
+                os.path.splitext(out)[0].replace("_answers_", "") + "_keeps.jsonl")
     apply_patch()
 
     from llava.model.builder import load_pretrained_model
@@ -155,7 +156,9 @@ def main():
         # 自检 2（修订#2）：掩码=模型实际消费的 px 现算（oracle_geom 冻结口径）；
         # 审计件存在则逐条硬比对，不等即停（说明两脚本 preprocess 漂移了）
         act = cell_activity(img_tensor.numpy())
-        keep, ink_n, note = build_keep(act, which)
+        kp, kb, au = build_keeps(act)
+        keep = kp if which == "payload" else kb
+        assert len(kp) == len(kb) == 144 and not (set(kp) & set(kb))   # 秩构造自检
         CURRENT_KEEP[0] = set(keep)
         if audit is not None and (cat, qid) in audit:
             assert keep == audit[(cat, qid)]["keep"], \
@@ -190,7 +193,7 @@ def main():
                                ensure_ascii=False) + "\n")
         fkeep.flush()
         if (i + 1) % 20 == 0:
-            print(f"[{i+1}/{len(rows)}] mismatch累计 {MISMATCH[0]}", flush=True)
+            print(f"[{i+1}/{len(rows)}]", flush=True)
     fout.close(); fkeep.close()
     print(f"完成 -> {out} / {keep_out}", flush=True)
 
