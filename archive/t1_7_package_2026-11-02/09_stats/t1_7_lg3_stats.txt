@@ -1,0 +1,6 @@
+LG3 · SD 介质（n=399/格）
+格         ASR      Δvs①      b   c    p(McNemar)
+textfloor    1.00%   -11.53pp   1  47   3.48e-13
+payload     13.03%    +0.50pp  11   9   0.824
+blank       13.03%    +0.50pp  13  11   0.839
+random      12.53%    +0.00pp  12  12   1

@@ -1,63 +1,58 @@
-# TASKS · 当前轮 T1.7：E1 文字地板 + E1' 场景操作层 + E4 判官免疫
+# TASKS · 当前轮 T1.8a-Day1：FasterVLM 进场三步（画像门，无裁决生成）
 
-> 唯一口径：`T1.7_E1_E1prime_protocol_2026-11-02.md`（预注册判读全部在其中）。
-> 上游：`研究大纲_2026-11-02.md` §4.2/§4.3。常驻规则 `Agent.md`；不改 `third_party/`、不改 `src/`。
-> 脚本在 `experiments/t1_7_2026-11-02/scripts/`（Mac 已过语法与逻辑自测）。
-> 目标一句话：把"四枚判定"的最后一枚（操作层×场景介质）与地板/判官两环补齐——**这是填空，不是开线**。
+> 唯一口径：`T1.8a_fasterVLM_protocol_2026-11-03.md`（已冻结：旧版仓库 + vanilla 栈 + 补丁#1/#2）。
+> 背景：T1.7 后全案格局 = "整图敏感、子集钝感"（E1 图贡献 +22.06pp；E1' 各操作格 ∈[−3.3,+2.3]pp）。
+> 本轮只做 §1a/1b/1c + B0 基线补格；**Day-2 四格须画像表回 Mac 过目放行后才开**。
+> 老规矩：不改 `third_party/`、不改 `src/`；适配代码在 /tmp 跑可以，原件随包回传入库。
+> 上轮（T1.7）已完成并归档：`code/archive/t1_7_package_2026-11-02/`，四枚判定集齐。
 
 ---
 
-## 一、顺序与命令
+## 一、进场三步（协议 §1，逐步带停线）
 
-### 1 · E1 文字地板（今天，~45 分钟全程）
+### 1a · 契约检查（半天，禁猜接口）
 ```bash
-CUDA_VISIBLE_DEVICES=5 /home/huangqixu01/venvs/trim-orig/bin/python \
-  experiments/t1_7_2026-11-02/scripts/t1_7_textfloor_gen.py --data /tmp/t1_4c_sd399_data.json
-# 判分（复用 t1_5_judge，--split SD --ref none 指向既有 SD-none 回答；none 那份若 /tmp 已清用包内）
+git clone https://github.com/Theia-4869/FasterVLM /tmp/fastervlm   # 记录 SHA
+git clone https://github.com/Theia-4869/VisPruner /tmp/vispruner   # 仅登记，不跑
 ```
-判读=协议 §2 表（E1 落 [53.4,58.4] ⇒ SD 图贡献 ≤5pp；<53.4 ⇒ E1' 升级为主证）。
+读它的 `clip_encoder.py`（或实际所在处），输出一页**选择逻辑说明书**：
+[CLS] 行注意力 → 动态阈值 τ → 相似度去重补多样性 → 最终保留名单；
+**实际剪的位置（进 LLM 前/第几层）、保留格数与 R 参数的换算公式、被丢格如何处置**逐项照实登记。
+**TRIM 先例条款**：仓库实现与其论文描述有出入 ⇒ 以仓库为准（V1），出入写披露节，不纠正。
 
-### 2 · E1' 掩码（今天并行；装不上 GD/SAM 就 `--force-b2`，协议允许）
-```bash
-python experiments/t1_7_2026-11-02/scripts/t1_7_fg_masks.py \
-  --data /tmp/t1_4c_sd399_data.json --msb-json third_party/mm-safetybench/data/processed_questions
-```
-必须回传**类目×branch 审计表**与 B1 率（<20% 且未声明 B2-only ⇒ 停线）。
-冒烟再试生成：`t1_7_oracle_prune.py --prune payload|blank --limit 3`
-（assert 145；打印 branch/fg_n/keep=144；`blank` 的 keeps 与 payload 的 fg 交集应为 0）。
+### 1b · 适配器抽离 + 核对门
+`select_cells(image) -> [keep 名单]` 独立函数（只需视觉编码器前向，CPU/单卡批量）。
+**核对门**：随机 10 张，适配器名单 vs 该仓库原生推理的实际保留名单，逐样本 Jaccard ≥0.99；
+不达 ⇒ 接线错，停。
 
-### 3 · E1' 全量三格（明天，两卡轮转，各 ~25–30 分钟）
-```bash
-... t1_7_oracle_prune.py --prune payload
-... t1_7_oracle_prune.py --prune blank
-... t1_7_oracle_prune.py --prune random
-```
-判分同 T1.6 流程（`--exp-prefix t1_7_oracle`），①SD-none(58.40) 用归档判定不重判。
-概念读出：`t1_6_readout.py` 对四格跑 R2（协议 §3.3 哨兵序 ④≥①≥②≥③）。
+### 1c · 挑格画像（先出表，后决定生成——本轮核心产出）
+399 × 两图型（SD + TYPO），每样本四个数：
+- **载荷包含率 × 三种标法**：T1.6 墨迹秩标法 / T1.7 SAM 前景标法 / 中心秩标法——
+  标法与掩码直接复用归档件（`code/archive/t1_6_package_2026-10-30/06_masks/`、
+  `code/archive/t1_7_package_2026-11-02/` 内审计件），**不得新写标法**；
+- 背景删除率；
+- 与 ④"只留字形"、③"只留背景"名单的 Jaccard；
+- 实际保留格数（按其真实值登记，**不掰到 144**）。
+画像 CSV 随包回传。**分支参考（协议 §1c）**：若文字图上载荷包含率 ≤45%，报告首段标红——
+Day-2 默认收缩为 A2/B0 一对经验点。
 
-### 4 · E4 LlamaGuard-3（与 3 并行或其后，1 GPU 时）
-部署：vLLM 起 llama-guard-3-8B（**确认自带官方 chat template**；脚本走 /completions 自拼模板，
-开跑前拿 3 条已知答案核对一次模板拼装，核对结果贴回来）。
-```bash
-python experiments/t1_7_2026-11-02/scripts/t1_7_rescore_lguard.py \
-  --base http://127.0.0.1:8005/completions --model llama-guard-3-8b \
-  --file none=/tmp/t1_5b_answers_none_typo399.json \
-  --file random=/tmp/t1_5b_answers_random_typo399.json \
-  --file blank=... --file payload=... \
-  --qwen-map none=<该格 judge_raw> --qwen-map payload=<该格 judge_raw> ...
-```
-文件清单：T1.6 四格 + T1.7 四格（E1/②③④）+ T1.5 两格 SD 对照——**全部回答文件在
-`t1_5*/t1_6_package_*/本轮` 内可寻**；LG3 绝对值不进表（协议 §4 资格限定已写死）。
+### B0 · 本轮唯一生成格（vanilla × TYPO × 不剪，~40 分钟）
+原版栈代码基 + **vanilla liuhaotian 权重**（注意不是 TRIM-FT），其余与 T1.6 §3 逐项相同、
+同批 399 id。**判分先不发**：按协议 §3，B0 与 Day-2 各格放**同一判官会话**统一判
+（跨会话漂移 1/399 的教训已写进协议）；回答文件做 sha 登记随包回传。
 
-## 二、停线（预先穷举，无现场裁量）
-| 条件 | 动作 |
+## 二、停线（穷举，无现场裁量）
+| # | 条件 |
 |---|---|
-| E1 assert 混入 image token / 判分解析失败>0.5% | 停报 |
-| 掩码 B1 率 <20% 且未跑 `--force-b2` 声明 | 停报（先定 headline 模式） |
-| ③ 与 ④ keeps 交集非空（任一样本） | 构造 bug，停报 |
-| LG3 三条模板核对不过 | E4 整节搁置，E1/E1' 照常（E4 是免疫性检验，非判定环） |
+| ① | 1b Jaccard < 0.99 |
+| ② | 1a 说明书与代码对不上（贴文件行号自证；证不了即停） |
+| ③ | B0 id 集与 399 不符 / 生成 assert 失败 |
+| ④ | 画像表缺任一标法 ⇒ 视为未回传 |
 
 ## 三、回传
-`t1_7_package_<日期>/`（01_reports/17_REPORT_T1.7_<日期>.md + answers/keeps/masks审计/judge_raw/
-结果块/LG3 verdicts）；报告必含：协议 §2 落点、§3.3 预注册判读三选一（含 B1-only 敏感性）、
-§3.2 审计表、E4 主配对符号表。**跑完这轮，四枚判定集齐，项目全面转入写作。**
+`t1_8a_probe_package_<日期>/`：1a 说明书（含 SHA + 版本出入披露）、1b 适配器原件、
+1c 画像 CSV、B0 answers + sha 清单；报告 18 号（前三步 + 落款"待 Day-2 放行"）。
+
+## 四、本轮明确不做
+Day-2 四格（等 Mac 放行）；D1/D2 80% 档；VisPruner 运行（只登记 SHA）；
+τ/R/阈值任何参数动（用其默认，动一个都算越线）；第二模型移植不占本轮机时。
